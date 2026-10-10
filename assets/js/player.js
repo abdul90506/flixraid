@@ -308,7 +308,8 @@
     const t = at ?? startAt;
     hideError();
     destroy();
-    if (s.kind === 'hls' && window.Hls && Hls.isSupported()) {
+
+    if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8') || s.url.includes('proxy.php'))) {
       hls = new Hls({
         enableWorker: true,
         startPosition: t > 0 ? t : -1,
@@ -347,9 +348,9 @@
   }
   function onHlsError(_, data) {
     if (!data.fatal) return;
-    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && netTries < 3 && started) {
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && netTries < 4) {
       netTries++;
-      setTimeout(() => hls && hls.startLoad(video.currentTime || -1), 700 * netTries);
+      setTimeout(() => hls && hls.startLoad(video.currentTime || -1), 800 * netTries);
       return;
     }
     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -559,7 +560,14 @@
     // nearest cached frame as placeholder
     let best = null, bd = 1e9;
     thumbs.forEach((v, k) => { const dd = Math.abs(k - key); if (dd < bd) { bd = dd; best = v; } });
-    if (best && bd <= 6) paintThumb(best); else pvFrame.classList.remove('has-frame');
+    if (best && bd <= 6) paintThumb(best);
+    else if (D.bg) {
+      // Show crisp title backdrop if frame is still buffering
+      pvFrame.style.backgroundImage = `url("${D.bg}")`;
+      pvFrame.classList.remove('has-frame');
+    } else {
+      pvFrame.classList.remove('has-frame');
+    }
     pvFrame.classList.add('loading');
     if (!pv) initPreview();
     if (pvBusy) pvPending = key; else seekPreview(key);
@@ -809,35 +817,107 @@
      ===================================================================== */
   function buildAudio() {
     const ul = $('#audioList');
-    let tracks = [];
-    if (hls && hls.audioTracks && hls.audioTracks.length) {
-      tracks = hls.audioTracks.map((t, i) => ({ i, name: t.name || t.lang || 'Track ' + (i + 1), on: hls.audioTrack === i }));
+    const ulSettings = $('#settingAudioList');
+    let html = '';
+
+    if (D.sources && D.sources.length > 1) {
+      html = D.sources.map((s, idx) => {
+        const isCurrent = (srcIdx === idx);
+        const name = s.label || s.lang || ('Audio Track ' + (idx + 1));
+        return `<li data-src-idx="${idx}" class="${isCurrent ? 'on' : ''}">${CHECK}${esc(name)}</li>`;
+      }).join('');
+    } else if (hls && hls.audioTracks && hls.audioTracks.length > 1) {
+      const tracks = hls.audioTracks.map((t, i) => ({ i, name: t.name || t.lang || 'Track ' + (i + 1), on: hls.audioTrack === i }));
       const seen = new Set();
-      tracks = tracks.filter((t) => (t.on || !seen.has(t.name)) && seen.add(t.name));
+      const filtered = tracks.filter((t) => (t.on || !seen.has(t.name)) && seen.add(t.name));
+      html = filtered.map((t) => `<li data-a="${t.i}" class="${t.on ? 'on' : ''}">${CHECK}${esc(t.name)}</li>`).join('');
     } else if (video.audioTracks && video.audioTracks.length > 1) {
-      tracks = Array.from(video.audioTracks).map((t, i) => ({ i, name: t.label || t.language || 'Track ' + (i + 1), on: t.enabled }));
+      const tracks = Array.from(video.audioTracks).map((t, i) => ({ i, name: t.label || t.language || 'Track ' + (i + 1), on: t.enabled }));
+      html = tracks.map((t) => `<li data-a="${t.i}" class="${t.on ? 'on' : ''}">${CHECK}${esc(t.name)}</li>`).join('');
+    } else {
+      const defName = (D.sources && D.sources[0] && (D.sources[0].label || D.sources[0].lang)) || 'Original / Default';
+      html = `<li class="on">${CHECK}${esc(defName)}</li>`;
     }
-    ul.innerHTML = tracks.length
-      ? tracks.map((t) => `<li data-a="${t.i}" class="${t.on ? 'on' : ''}">${CHECK}${esc(t.name)}</li>`).join('')
-      : `<li class="on">${CHECK}Original</li>`;
+
+    if (ul) ul.innerHTML = html;
+    if (ulSettings) ulSettings.innerHTML = html;
   }
-  $('#audioList').addEventListener('click', (e) => {
-    const li = e.target.closest('[data-a]');
+
+  function handleAudioSelection(e) {
+    const li = e.target.closest('[data-src-idx], [data-a]');
     if (!li) return;
-    const i = +li.dataset.a;
-    if (hls) hls.audioTrack = i;
-    else if (video.audioTracks) Array.from(video.audioTracks).forEach((t, j) => { t.enabled = j === i; });
-    buildAudio();
-  });
+    if (li.dataset.srcIdx !== undefined) {
+      const idx = +li.dataset.srcIdx;
+      if (idx !== srcIdx) {
+        const curT = video.currentTime || 0;
+        toast('Switching Audio: ' + (D.sources[idx].label || D.sources[idx].lang));
+        load(idx, curT);
+      }
+      return;
+    }
+    if (li.dataset.a !== undefined) {
+      const i = +li.dataset.a;
+      if (hls) hls.audioTrack = i;
+      else if (video.audioTracks) Array.from(video.audioTracks).forEach((t, j) => { t.enabled = j === i; });
+      buildAudio();
+    }
+  }
+
+  $('#audioList')?.addEventListener('click', handleAudioSelection);
+  $('#settingAudioList')?.addEventListener('click', handleAudioSelection);
 
   /* =====================================================================
      subtitles (custom Netflix-style renderer)
      ===================================================================== */
   let sub = { kind: 'off' }, lastSubHtml = '';
+  let extCues = [], extSubLoading = false;
+
+  function parseSrtOrVtt(text) {
+    const cues = [];
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const blocks = normalized.split(/\n\n+/);
+    for (const block of blocks) {
+      const lines = block.trim().split('\n');
+      if (!lines.length) continue;
+      let timeLineIdx = 0;
+      if (!lines[0].includes('-->') && lines.length > 1 && lines[1].includes('-->')) {
+        timeLineIdx = 1;
+      }
+      if (!lines[timeLineIdx] || !lines[timeLineIdx].includes('-->')) continue;
+      const m = lines[timeLineIdx].match(/(\d{1,2}:)?(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}:)?(\d{2}):(\d{2})[,.](\d{3})/);
+      if (!m) continue;
+      const parseSec = (h, min, s, ms) => ((parseInt(h || '0', 10) * 3600) + (parseInt(min, 10) * 60) + parseInt(s, 10) + (parseInt(ms, 10) / 1000));
+      const start = parseSec(m[1], m[2], m[3], m[4]);
+      const end = parseSec(m[5], m[6], m[7], m[8]);
+      const textLines = lines.slice(timeLineIdx + 1).join('\n').trim();
+      if (textLines) cues.push({ start, end, text: textLines });
+    }
+    return cues;
+  }
+
+  function loadExternalSub(url) {
+    extSubLoading = true;
+    extCues = [];
+    fetch(url)
+      .then((r) => r.text())
+      .then((t) => {
+        extCues = parseSrtOrVtt(t);
+        extSubLoading = false;
+      })
+      .catch(() => {
+        extSubLoading = false;
+      });
+  }
+
   function subOptions() {
     const out = [];
     if (hls && hls.subtitleTracks) hls.subtitleTracks.forEach((t, i) => out.push({ kind: 'hls', i, name: t.name || t.lang || 'Track ' + (i + 1), lang: (t.lang || '').toLowerCase() }));
     else if (!hls) Array.from(video.textTracks || []).forEach((t, i) => { if (/subtitles|captions/.test(t.kind)) out.push({ kind: 'native', i, name: t.label || t.language || 'Track ' + (i + 1), lang: (t.language || '').toLowerCase() }); });
+    if (D.subtitles && Array.isArray(D.subtitles)) {
+      D.subtitles.forEach((s, i) => {
+        out.push({ kind: 'external', i, name: s.label || s.lang, lang: (s.lang || '').toLowerCase(), url: s.url });
+      });
+    }
     return out;
   }
   function buildSubs() {
@@ -855,12 +935,16 @@
   function setSub(kind, i, silent) {
     sub = kind === 'off' ? { kind: 'off' } : { kind, i: +i };
     lastSubHtml = ''; subsBox.innerHTML = '';
+    extCues = [];
     if (hls) { hls.subtitleTrack = kind === 'hls' ? +i : -1; hls.subtitleDisplay = false; }
     Array.from(video.textTracks || []).forEach((t, j) => {
       if (kind === 'native') t.mode = j === +i ? 'hidden' : 'disabled';
       else if (kind !== 'hls') t.mode = 'disabled';
     });
     const opt = subOptions().find((o) => o.kind === kind && o.i === +i);
+    if (kind === 'external' && opt && opt.url) {
+      loadExternalSub(opt.url);
+    }
     if (!silent) {
       prefs.subLang = kind === 'off' ? '' : (opt && opt.lang) || ''; savePrefs();
       toast(kind === 'off' ? 'Subtitles off' : 'Subtitles: ' + (opt ? opt.name : ''));
@@ -889,6 +973,10 @@
   }
   function activeCueTexts() {
     if (sub.kind === 'off') return [];
+    if (sub.kind === 'external') {
+      const cur = video.currentTime || 0;
+      return extCues.filter((c) => cur >= c.start && cur <= c.end).map((c) => c.text);
+    }
     const all = Array.from(video.textTracks || []);
     let tr;
     if (sub.kind === 'native') tr = all[sub.i];
