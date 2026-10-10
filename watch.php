@@ -348,6 +348,7 @@ $I = [
 <section class="stage" id="stage">
 <div class="nfp is-loading is-paused<?= $type === 'tv' ? ' is-tv' : '' ?><?= $next ? ' has-next' : '' ?>" id="nfp" tabindex="-1">
   <video id="nfpVideo" playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
+  <iframe id="nfpIframe" class="nfp-iframe" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;z-index:2;background:#000;"></iframe>
   <div class="nfp-subs" id="nfpSubs" aria-live="off"></div>
   <div class="nfp-click" id="nfpClick"></div>
   <div class="nfp-shade"></div>
@@ -480,13 +481,15 @@ $I = [
     <button class="nfp-icon panel-x" data-close-panel><?= $I['close'] ?></button>
     <h4 class="sheet-title">Settings</h4>
     <div class="st-tabs" role="tablist">
-      <button class="st-tab on" type="button" data-st="q" title="Quality" aria-label="Quality"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="15" width="3.2" height="6" rx=".6"/><rect x="8.2" y="11.5" width="3.2" height="9.5" rx=".6"/><rect x="13.4" y="7.5" width="3.2" height="13.5" rx=".6"/><rect x="18.6" y="3.5" width="3.2" height="17.5" rx=".6"/></svg></button>
+      <button class="st-tab on" type="button" data-st="server" title="Server" aria-label="Server"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></button>
+      <button class="st-tab" type="button" data-st="q" title="Quality" aria-label="Quality"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="15" width="3.2" height="6" rx=".6"/><rect x="8.2" y="11.5" width="3.2" height="9.5" rx=".6"/><rect x="13.4" y="7.5" width="3.2" height="13.5" rx=".6"/><rect x="18.6" y="3.5" width="3.2" height="17.5" rx=".6"/></svg></button>
       <button class="st-tab" type="button" data-st="audio" title="Audio &amp; Languages" aria-label="Audio &amp; Languages"><?= $I['subs'] ?></button>
       <button class="st-tab" type="button" data-st="cc" title="Subtitles" aria-label="Subtitles"><?= $I['cc'] ?></button>
       <button class="st-tab" type="button" data-st="sp" title="Playback speed" aria-label="Playback speed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8h5M3.5 12h4M2 16h5"/><circle cx="15.5" cy="12" r="7" fill="currentColor" stroke="none"/><path d="M15.5 8.2V12l2.6 1.8" stroke="#262626" stroke-width="1.8"/></svg></button>
     </div>
+    <div class="st-sec st-server on" data-pane="server"><h4>Streaming Servers</h4><ul id="serverList"></ul></div>
     <div class="st-sec st-sp" data-pane="sp"><h4>Playback Speed</h4><div class="sp-line" id="speedList"></div></div>
-    <div class="st-sec st-q on" data-pane="q"><h4>Quality</h4><ul id="qualityList"></ul></div>
+    <div class="st-sec st-q" data-pane="q"><h4>Quality</h4><ul id="qualityList"></ul></div>
     <div class="st-sec st-audio" data-pane="audio"><h4>Audio &amp; Languages</h4><ul id="settingAudioList"></ul></div>
     <div class="st-sec st-cc" data-pane="cc"><button class="st-subset" type="button">Subtitle Settings</button><ul id="subList2"></ul></div>
   </div>

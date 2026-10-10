@@ -212,6 +212,22 @@ switch ($action) {
         json_out(['items' => $out]);
     }
 
+    case 'stream': {
+        require_once __DIR__ . '/includes/StreamApi.php';
+        $type = q('type') === 'tv' ? 'tv' : 'movie';
+        $id   = qi('id');
+        $s    = max(1, qi('s', 1));
+        $e    = max(1, qi('e', 1));
+
+        $sources = StreamApi::getSources($type, $id, $s, $e);
+        $subs    = StreamApi::getSubtitles($type, $id, $s, $e);
+
+        json_out([
+            'sources'   => $sources,
+            'subtitles' => $subs,
+        ]);
+    }
+
     default:
         json_out(['error' => 'Unknown action'], 400);
 }

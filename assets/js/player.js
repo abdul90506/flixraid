@@ -11,6 +11,7 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const root = $('#nfp');
   const video = $('#nfpVideo');
+  const iframe = $('#nfpIframe');
   const subsBox = $('#nfpSubs');
   const SKIP = D.skip || 10;
   const store = {
@@ -308,8 +309,29 @@
     const t = at ?? startAt;
     hideError();
     destroy();
+    buildServers();
 
-    if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8') || s.url.includes('proxy.php'))) {
+    if (s.kind === 'embed') {
+      video.style.display = 'none';
+      if (iframe) {
+        iframe.style.display = 'block';
+        iframe.src = s.url;
+      }
+      root.classList.remove('is-loading', 'is-buffering', 'need-play');
+      root.classList.add('is-embed-mode');
+      started = true;
+      return;
+    }
+
+    // Direct HTML5 / HLS stream mode
+    if (iframe) {
+      iframe.style.display = 'none';
+      iframe.src = 'about:blank';
+    }
+    video.style.display = 'block';
+    root.classList.remove('is-embed-mode');
+
+    if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8') || s.url.includes('proxy.php') || s.url.includes('workers.dev'))) {
       hls = new Hls({
         enableWorker: true,
         startPosition: t > 0 ? t : -1,
@@ -328,7 +350,7 @@
         setPct(15);
         netTries = 0;
         applyQualityPref();
-        buildQuality(); buildAudio(); buildSubs();
+        buildQuality(); buildAudio(); buildSubs(); buildServers();
         tryPlay();
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, buildQuality);
@@ -341,7 +363,7 @@
     } else {
       video.src = s.url; // Safari / iOS native HLS or MP4
       if (t > 0) video.addEventListener('loadedmetadata', () => { try { video.currentTime = t; } catch { /* ignore */ } }, { once: true });
-      video.addEventListener('loadedmetadata', () => { buildQuality(); buildAudio(); buildSubs(); restoreSubPref(); }, { once: true });
+      video.addEventListener('loadedmetadata', () => { buildQuality(); buildAudio(); buildSubs(); restoreSubPref(); buildServers(); }, { once: true });
       tryPlay();
     }
     video.playbackRate = curSpeed;
@@ -813,6 +835,39 @@
   video.addEventListener('loadedmetadata', buildQuality);
 
   /* =====================================================================
+     servers (Direct HLS & Embed Fallback Switcher)
+     ===================================================================== */
+  function buildServers() {
+    const ul = $('#serverList');
+    if (!ul || !D.sources) return;
+
+    let html = D.sources.map((s, idx) => {
+      const isCur = (srcIdx === idx);
+      const isEmbed = (s.kind === 'embed');
+      const badge = isEmbed ? '<span style="font-size:11px;background:#e50914;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">EMBED</span>' : '<span style="font-size:11px;background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">DIRECT</span>';
+      const name = s.server || s.label || ('Server ' + (idx + 1));
+      const subInfo = s.lang ? `<small style="display:block;opacity:0.7;font-size:12px;margin-top:2px;">${esc(s.lang)}</small>` : '';
+      return `<li data-srv="${idx}" class="${isCur ? 'on' : ''}">${CHECK}<div style="flex:1;"><b>${esc(name)}</b> ${badge}${subInfo}</div></li>`;
+    }).join('');
+
+    ul.innerHTML = html;
+  }
+
+  $('#serverList')?.addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-srv]');
+    if (!li || !D.sources) return;
+    const idx = +li.dataset.srv;
+    if (idx !== srcIdx) {
+      const s = D.sources[idx];
+      toast('Switching Server: ' + (s.server || s.label || 'Server'));
+      const curT = video.currentTime || 0;
+      load(idx, curT);
+      buildServers();
+      if (touch) setTimeout(closePanels, 250);
+    }
+  });
+
+  /* =====================================================================
      audio tracks
      ===================================================================== */
   function buildAudio() {
@@ -1220,17 +1275,41 @@
     clearTimeout(prebootT);
     if (prebooting) { prebooting = false; if (hls) hls.config.maxBufferLength = 30; }
     stopTrailer();
-    if (!isPlaying()) {
-      body.classList.add('is-playing');
-      if (gesture) { try { history.pushState({ cfPlayer: 1 }, ''); } catch { /* ignore */ } }
+
+    // 1. Instantly switch to playing mode so controls & Netflix spinner show without any delay
+    body.classList.add('is-playing');
+    root.classList.remove('need-play', 'is-ended');
+    root.classList.add('is-loading');
+    startPct();
+    $('#nfpEnd').hidden = true;
+    if (gesture) { try { history.pushState({ cfPlayer: 1 }, ''); } catch { /* ignore */ } }
+
+    // 2. If sources are already present, start playback immediately
+    if (D.sources && D.sources.length) {
+      if (!booted) boot();
+      else {
+        const rp = resumePoint();
+        if (video.ended || (rp && Math.abs(video.currentTime - rp) > 30)) seekTo(rp);
+        video.play().catch(() => root.classList.add('need-play'));
+      }
+    } else {
+      // 3. Ultra-fast dynamic stream resolution from API
+      const sParam = D.s ? `&s=${D.s}` : '';
+      const eParam = D.e ? `&e=${D.e}` : '';
+      fetch(`api.php?action=stream&type=${D.type}&id=${D.id}${sParam}${eParam}`)
+        .then(r => r.json())
+        .then(res => {
+          if (res && res.sources && res.sources.length) {
+            D.sources = res.sources;
+            if (res.subtitles) D.subtitles = res.subtitles;
+            boot();
+          } else {
+            showError('No playable stream found.');
+          }
+        })
+        .catch(() => showError('Failed to load streaming links.'));
     }
-    root.classList.remove('need-play', 'is-ended'); $('#nfpEnd').hidden = true;
-    if (!booted) boot();
-    else {
-      const rp = resumePoint();
-      if (video.ended || (rp && Math.abs(video.currentTime - rp) > 30)) seekTo(rp);
-      video.play().catch(() => root.classList.add('need-play'));
-    }
+
     // phones: playing from the details sheet goes straight to landscape full screen (like the Netflix app)
     if (gesture && touch && Math.min(innerWidth, innerHeight) < 600 && !fsEl() && (root.requestFullscreen || root.webkitRequestFullscreen)) toggleFs();
     sizeCheck(); wake();

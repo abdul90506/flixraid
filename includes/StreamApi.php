@@ -2,6 +2,14 @@
 /**
  * StreamApi Resolver for Flixraid
  * Resolves working multi-language & multi-quality streams for movies & TV series.
+ * Supports:
+ * - 8StreamApi (AllMovieLand) [Direct HLS, Hindi, English, Multi-lang]
+ * - VixSrc [Direct Multi-Quality HLS up to 1080p with Subtitles]
+ * - MoviesApi (Vidora Direct HLS)
+ * - VidSrc (Embed Server Fallback)
+ * - VidApi (Embed Server Fallback)
+ * 
+ * Routes streams through Cloudflare Worker (or local proxy fallback) for high speed & zero CORS blocks.
  */
 
 class StreamApi
@@ -11,12 +19,26 @@ class StreamApi
     private static string $moviesApiKey = '3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13';
 
     /**
+     * Build proxy streaming URL (Uses Cloudflare Worker if defined, else local proxy.php)
+     */
+    public static function buildStreamUrl(string $targetUrl, string $referer = 'https://google.com'): string
+    {
+        if (defined('STREAM_WORKER_URL') && STREAM_WORKER_URL) {
+            $base = rtrim(STREAM_WORKER_URL, '/');
+            return "{$base}/?url=" . urlencode($targetUrl) . '&ref=' . urlencode($referer);
+        }
+        return 'proxy.php?url=' . urlencode($targetUrl) . '&ref=' . urlencode($referer);
+    }
+
+    /**
      * Get stream sources for movie or TV show episode
      */
     public static function getSources(string $type, int $tmdbId, ?int $season = 1, ?int $episode = 1): array
     {
+        $season = $season ?: 1;
+        $episode = $episode ?: 1;
         $cacheFile = CACHE_DIR . "/src_{$type}_{$tmdbId}_{$season}_{$episode}.json";
-        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600 * 2)) {
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600 * 3)) {
             $cached = json_decode(file_get_contents($cacheFile), true);
             if (!empty($cached)) return $cached;
         }
@@ -24,18 +46,32 @@ class StreamApi
         $sources = [];
         $imdbId = self::getImdbId($type, $tmdbId);
 
-        if ($type === 'movie') {
-            // 1. Try 8StreamApi (AllMovieLand) for multi-language streams
-            if ($imdbId) {
-                $eightStreams = self::get8StreamMovieSources($imdbId);
-                if (!empty($eightStreams)) {
-                    foreach ($eightStreams as $st) {
-                        $sources[] = $st;
-                    }
+        // ==========================================
+        // 1. Direct Server: 8StreamApi (AllMovieLand)
+        // ==========================================
+        if ($type === 'movie' && $imdbId) {
+            $eightStreams = self::get8StreamMovieSources($imdbId);
+            if (!empty($eightStreams)) {
+                foreach ($eightStreams as $st) {
+                    $sources[] = $st;
                 }
             }
+        }
 
-            // 2. Try MoviesApi (Vidora)
+        // ==========================================
+        // 2. Direct Server: VixSrc (Direct HLS 1080p/720p/480p)
+        // ==========================================
+        $vixSources = self::getVixSrcSources($type, $tmdbId, $season, $episode);
+        if (!empty($vixSources)) {
+            foreach ($vixSources as $st) {
+                $sources[] = $st;
+            }
+        }
+
+        // ==========================================
+        // 3. Direct Server: MoviesApi (Vidora Direct HLS)
+        // ==========================================
+        if ($type === 'movie') {
             $movieApiStreams = self::getMoviesApiMovieSources($tmdbId);
             if (!empty($movieApiStreams)) {
                 foreach ($movieApiStreams as $st) {
@@ -43,13 +79,47 @@ class StreamApi
                 }
             }
         } else {
-            // TV Shows: Fetch episode stream from MoviesApi (Direct HLS)
-            $tvStreams = self::getMoviesApiTvSources($tmdbId, $season ?: 1, $episode ?: 1);
+            $tvStreams = self::getMoviesApiTvSources($tmdbId, $season, $episode);
             if (!empty($tvStreams)) {
                 foreach ($tvStreams as $st) {
                     $sources[] = $st;
                 }
             }
+        }
+
+        // ==========================================
+        // 4. Fallback Embed Servers (VidSrc & VidApi)
+        // ==========================================
+        if ($type === 'movie') {
+            $sources[] = [
+                'label'   => 'VidSrc (Embed Server)',
+                'lang'    => 'Multi-Quality / CC',
+                'url'     => "https://vidsrc.to/embed/movie/{$tmdbId}",
+                'kind'    => 'embed',
+                'server'  => 'VidSrc',
+            ];
+            $sources[] = [
+                'label'   => 'VidAPI (Embed Server)',
+                'lang'    => 'Fast Cloud Server',
+                'url'     => "https://vidapi.ru/embed/movie/{$tmdbId}",
+                'kind'    => 'embed',
+                'server'  => 'VidAPI',
+            ];
+        } else {
+            $sources[] = [
+                'label'   => 'VidSrc (Embed Server)',
+                'lang'    => 'Multi-Quality / CC',
+                'url'     => "https://vidsrc.to/embed/tv/{$tmdbId}/{$season}/{$episode}",
+                'kind'    => 'embed',
+                'server'  => 'VidSrc',
+            ];
+            $sources[] = [
+                'label'   => 'VidAPI (Embed Server)',
+                'lang'    => 'Fast Cloud Server',
+                'url'     => "https://vidapi.ru/embed/tv/{$tmdbId}/{$season}/{$episode}",
+                'kind'    => 'embed',
+                'server'  => 'VidAPI',
+            ];
         }
 
         if (!empty($sources)) {
@@ -83,7 +153,6 @@ class StreamApi
         $data = json_decode($json, true);
         if (empty($data['subtitles']) || !is_array($data['subtitles'])) return [];
 
-        // Lang name map
         $langNames = [
             'eng' => 'English',
             'hin' => 'Hindi',
@@ -114,12 +183,11 @@ class StreamApi
         foreach ($data['subtitles'] as $item) {
             if (empty($item['url']) || empty($item['lang'])) continue;
             $langCode = strtolower(trim($item['lang']));
-            if (isset($seen[$langCode])) continue; // 1 cleanest track per language
+            if (isset($seen[$langCode])) continue;
             $seen[$langCode] = true;
 
             $langLabel = $langNames[$langCode] ?? strtoupper($langCode);
-            // Proxy subtitle to avoid CORS / SSL errors
-            $proxySub = 'proxy.php?url=' . urlencode($item['url']) . '&ref=' . urlencode('https://opensubtitles.org/');
+            $proxySub = self::buildStreamUrl($item['url'], 'https://opensubtitles.org/');
 
             $subs[] = [
                 'lang'  => $langCode,
@@ -128,7 +196,6 @@ class StreamApi
             ];
         }
 
-        // Sort so English and Hindi are on top if available
         usort($subs, function($a, $b) {
             $p = ['eng' => 1, 'hin' => 2];
             $pa = $p[$a['lang']] ?? 99;
@@ -145,52 +212,56 @@ class StreamApi
     }
 
     /**
-     * Get IMDb ID using TMDB external_ids
+     * Get sources from VixSrc (Direct HLS with Multi-Bitrate)
      */
-    public static function getImdbId(string $type, int $tmdbId): ?string
+    private static function getVixSrcSources(string $type, int $tmdbId, int $season, int $episode): array
     {
-        $cacheFile = CACHE_DIR . "/ext_{$type}_{$tmdbId}.json";
-        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 86400 * 7)) {
-            $data = json_decode(file_get_contents($cacheFile), true);
-            if (!empty($data['imdb_id'])) return $data['imdb_id'];
+        $apiUrl = ($type === 'movie') 
+            ? "https://vixsrc.to/api/movie/{$tmdbId}"
+            : "https://vixsrc.to/api/tv/{$tmdbId}/{$season}/{$episode}";
+
+        $res = self::httpGet($apiUrl, [
+            'Referer: https://vixsrc.to',
+            'Origin: https://vixsrc.to',
+            'Accept: application/json'
+        ]);
+
+        if (!$res) return [];
+        $json = json_decode($res, true);
+        if (empty($json['src'])) return [];
+
+        $embedUrl = 'https://vixsrc.to' . $json['src'];
+        $html = self::httpGet($embedUrl, [
+            "Referer: {$apiUrl}",
+            'Origin: https://vixsrc.to'
+        ]);
+
+        if (!$html) return [];
+
+        if (preg_match('/token["\']?\s*[:=]\s*["\']([^"\']+)/i', $html, $tm) &&
+            preg_match('/expires["\']?\s*[:=]\s*["\']([^"\']+)/i', $html, $em) &&
+            preg_match('/url["\']?\s*[:=]\s*["\']([^"\']+)/i', $html, $pm)) {
+            
+            $rawPlaylist = stripslashes($pm[1]);
+            $token = $tm[1];
+            $expires = $em[1];
+            $sep = strpos($rawPlaylist, '?') !== false ? '&' : '?';
+            $masterM3u8 = "{$rawPlaylist}{$sep}token={$token}&expires={$expires}&h=1";
+
+            $streamUrl = self::buildStreamUrl($masterM3u8, $embedUrl);
+
+            return [
+                [
+                    'label'   => 'VixSrc Direct (1080p HLS)',
+                    'lang'    => 'Original / English',
+                    'url'     => $streamUrl,
+                    'kind'    => 'hls',
+                    'server'  => 'VixSrc',
+                ]
+            ];
         }
 
-        $url = "https://api.themoviedb.org/3/{$type}/{$tmdbId}/external_ids?api_key=" . self::$tmdbKey;
-        $json = self::httpGet($url);
-        if ($json) {
-            $data = json_decode($json, true);
-            if (!empty($data['imdb_id'])) {
-                @file_put_contents($cacheFile, $json);
-                return $data['imdb_id'];
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Resolve 8StreamApi / AllMovieLand player domain
-     */
-    private static function getPlayerDomain(): string
-    {
-        if (self::$playerDomain) return self::$playerDomain;
-
-        $cacheFile = CACHE_DIR . "/allmovieland_domain.txt";
-        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600 * 3)) {
-            $d = trim(file_get_contents($cacheFile));
-            if ($d) {
-                self::$playerDomain = $d;
-                return $d;
-            }
-        }
-
-        $js = self::httpGet('https://allmovieland.link/player.js?v=60%20128');
-        if ($js && preg_match("/const AwsIndStreamDomain\s*=\s*'([^']+)'/", $js, $m)) {
-            self::$playerDomain = trim($m[1]);
-            @file_put_contents($cacheFile, self::$playerDomain);
-            return self::$playerDomain;
-        }
-
-        return 'https://slast430did.com';
+        return [];
     }
 
     /**
@@ -241,11 +312,11 @@ class StreamApi
 
             $masterM3u8 = trim($m3u8Res ?: '');
             if (preg_match('#^https?://#i', $masterM3u8)) {
-                $proxyUrl = 'proxy.php?url=' . urlencode($masterM3u8) . '&ref=' . urlencode($playUrl);
+                $streamUrl = self::buildStreamUrl($masterM3u8, $playUrl);
                 $sources[] = [
-                    'label'   => $langTitle,
+                    'label'   => "8StreamApi ({$langTitle})",
                     'lang'    => $langTitle,
-                    'url'     => $proxyUrl,
+                    'url'     => $streamUrl,
                     'kind'    => 'hls',
                     'server'  => '8StreamApi',
                 ];
@@ -274,11 +345,11 @@ class StreamApi
         $sources = [];
         foreach ($data['sources'] as $src) {
             if (empty($src['url'])) continue;
-            $proxyUrl = 'proxy.php?url=' . urlencode($src['url']) . '&ref=' . urlencode('https://moviesapi.to/');
+            $streamUrl = self::buildStreamUrl($src['url'], 'https://moviesapi.to/');
             $sources[] = [
-                'label'   => 'Server Direct (Multi-Quality)',
+                'label'   => 'MoviesApi Direct (Multi-Quality)',
                 'lang'    => 'Original / English',
-                'url'     => $proxyUrl,
+                'url'     => $streamUrl,
                 'kind'    => 'hls',
                 'server'  => 'MoviesApi',
             ];
@@ -305,16 +376,65 @@ class StreamApi
         $sources = [];
         foreach ($data['sources'] as $src) {
             if (empty($src['url'])) continue;
-            $proxyUrl = 'proxy.php?url=' . urlencode($src['url']) . '&ref=' . urlencode('https://moviesapi.to/');
+            $streamUrl = self::buildStreamUrl($src['url'], 'https://moviesapi.to/');
             $sources[] = [
-                'label'   => 'Direct HLS (Multi-Quality)',
+                'label'   => 'MoviesApi Direct HLS',
                 'lang'    => 'Original / Default',
-                'url'     => $proxyUrl,
+                'url'     => $streamUrl,
                 'kind'    => 'hls',
                 'server'  => 'MoviesApi',
             ];
         }
         return $sources;
+    }
+
+    /**
+     * Resolve 8StreamApi / AllMovieLand player domain
+     */
+    private static function getPlayerDomain(): string
+    {
+        if (self::$playerDomain) return self::$playerDomain;
+
+        $cacheFile = CACHE_DIR . "/allmovieland_domain.txt";
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600 * 3)) {
+            $d = trim(file_get_contents($cacheFile));
+            if ($d) {
+                self::$playerDomain = $d;
+                return $d;
+            }
+        }
+
+        $js = self::httpGet('https://allmovieland.link/player.js?v=60%20128');
+        if ($js && preg_match("/const AwsIndStreamDomain\s*=\s*'([^']+)'/", $js, $m)) {
+            self::$playerDomain = trim($m[1]);
+            @file_put_contents($cacheFile, self::$playerDomain);
+            return self::$playerDomain;
+        }
+
+        return 'https://slast430did.com';
+    }
+
+    /**
+     * Get IMDb ID using TMDB external_ids
+     */
+    public static function getImdbId(string $type, int $tmdbId): ?string
+    {
+        $cacheFile = CACHE_DIR . "/ext_{$type}_{$tmdbId}.json";
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 86400 * 7)) {
+            $data = json_decode(file_get_contents($cacheFile), true);
+            if (!empty($data['imdb_id'])) return $data['imdb_id'];
+        }
+
+        $url = "https://api.themoviedb.org/3/{$type}/{$tmdbId}/external_ids?api_key=" . self::$tmdbKey;
+        $json = self::httpGet($url);
+        if ($json) {
+            $data = json_decode($json, true);
+            if (!empty($data['imdb_id'])) {
+                @file_put_contents($cacheFile, $json);
+                return $data['imdb_id'];
+            }
+        }
+        return null;
     }
 
     private static function httpGet(string $url, array $headers = []): ?string
@@ -329,8 +449,8 @@ class StreamApi
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
-            CURLOPT_TIMEOUT        => 12,
-            CURLOPT_CONNECTTIMEOUT => 6,
+            CURLOPT_TIMEOUT        => 8,
+            CURLOPT_CONNECTTIMEOUT => 4,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER     => $reqHeaders,
