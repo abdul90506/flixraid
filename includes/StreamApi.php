@@ -23,10 +23,6 @@ class StreamApi
      */
     public static function buildStreamUrl(string $targetUrl, string $referer = 'https://google.com', bool $preferWorker = false): string
     {
-        if ($preferWorker && defined('STREAM_WORKER_URL') && STREAM_WORKER_URL) {
-            $base = rtrim(STREAM_WORKER_URL, '/');
-            return "{$base}/?url=" . urlencode($targetUrl) . '&ref=' . urlencode($referer);
-        }
         return 'proxy.php?url=' . urlencode($targetUrl) . '&ref=' . urlencode($referer);
     }
 
@@ -102,7 +98,7 @@ class StreamApi
             $sources[] = [
                 'label'   => 'VidSrc (Embed Server)',
                 'lang'    => 'Multi-Quality / CC',
-                'url'     => "https://vidsrc.to/embed/movie/{$tmdbId}",
+                'url'     => "https://vsembed.ru/embed/movie/{$tmdbId}",
                 'kind'    => 'embed',
                 'server'  => 'VidSrc',
             ];
@@ -117,7 +113,7 @@ class StreamApi
             $sources[] = [
                 'label'   => 'VidSrc (Embed Server)',
                 'lang'    => 'Multi-Quality / CC',
-                'url'     => "https://vidsrc.to/embed/tv/{$tmdbId}/{$season}/{$episode}",
+                'url'     => "https://vsembed.ru/embed/tv/{$tmdbId}/{$season}/{$episode}",
                 'kind'    => 'embed',
                 'server'  => 'VidSrc',
             ];

@@ -32,8 +32,8 @@ define('HTTP_UA', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 // Player theme color (hex without #)
 define('PLAYER_COLOR', 'e50914');
 
-// Cloudflare Stream Worker Proxy (Ultra-fast CDN HLS Proxy)
-define('STREAM_WORKER_URL', 'https://steep-cell-9937stream.abdulwahab164978.workers.dev/');
+// Stream Proxy (Uses local direct proxy.php for maximum speed and compatibility)
+define('STREAM_WORKER_URL', '');
 
 
 

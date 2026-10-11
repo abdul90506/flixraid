@@ -362,15 +362,14 @@ $I = [
     <div class="nfp-loading-inner">
       <?php if ($logo): ?><img src="<?= e($logo) ?>" alt="" class="nfp-loading-logo"><?php else: ?><div class="nfp-loading-title"><?= e($d['title']) ?></div><?php endif; ?>
       <?php if ($type === 'tv'): ?><div class="nfp-loading-ep">S<?= $s ?>:E<?= $e ?><?= $episode ? ' · ' . e($episode['name']) : '' ?></div><?php endif; ?>
-      <div class="nfp-ring" id="nfpRing" role="progressbar" aria-label="Loading"><span id="nfpPct">0%</span></div>
+      <div class="nfp-ring" id="nfpRing" role="progressbar" aria-label="Loading"></div>
     </div>
   </div>
   <div class="nfp-buffer" id="nfpBuffer"><div class="nfp-spinner"></div></div>
 
-  <!-- top bar: close X, + centred title on touch + Server switcher in embed mode -->
+  <!-- top bar: close X, + centred title on touch -->
   <div class="nfp-top">
     <div class="nfp-top-title"><b><?= e($d['title']) ?></b><?php if ($type === 'tv'): ?><span>S<?= $s ?>:E<?= $e ?><?= $episode ? ' “' . e($episode['name']) . '”' : '' ?></span><?php endif; ?></div>
-    <button class="nfp-icon nfp-server embed-server-btn" data-panel="server" title="Switch Server" style="display:none;" aria-label="Switch Server"><?= $I['server'] ?><span>Server</span></button>
     <button class="nfp-icon nfp-close" id="nfpClose" title="Close (Esc)" aria-label="Close player"><?= $I['close'] ?></button>
   </div>
 
