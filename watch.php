@@ -156,6 +156,7 @@ $I = [
     'send'   => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M21 3 10.2 13.8M21 3l-6.8 18-4-7.2L3 9.8Z"/></svg>',
     'film'   => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>',
     'down'   => '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    'server' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
 ];
 ?><!DOCTYPE html>
 <html lang="en"<?= $embed ? ' class="embed"' : '' ?>>
@@ -447,6 +448,7 @@ $I = [
         <?php endif; ?>
         <button class="nfp-icon" data-panel="subs" title="Audio &amp; Subtitles"><?= $I['subs'] ?></button>
         <?php if ($type === 'tv'): ?><button class="nfp-icon" data-panel="episodes" title="Episodes"><?= $I['eps'] ?></button><?php endif; ?>
+        <button class="nfp-icon nfp-server" data-panel="server" title="Server (Direct &amp; Embed)"><?= $I['server'] ?><small class="srvBadge" style="position:absolute;top:-3px;right:-10px;background:#22c55e;color:#fff;font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;line-height:1.3;">DIRECT</small></button>
         <button class="nfp-icon nfp-cc" id="btnCC" title="Subtitles on/off (C)"><?= $I['cc'] ?></button>
         <button class="nfp-icon nfp-q" data-panel="settings" title="Settings – speed &amp; quality"><?= $I['gear'] ?><small class="qBadge"></small></button>
         <button class="nfp-icon" id="btnPip" title="Picture in picture (P)" hidden><?= $I['pip'] ?></button>
@@ -455,6 +457,7 @@ $I = [
     </div>
 
     <div class="nfp-actions touch-row">
+      <button class="act" data-panel="server"><span class="nfp-icon"><?= $I['server'] ?></span><b><i class="lg">Server (</i><span id="actServer">Auto</span><i class="lg">)</i></b></button>
       <button class="act" data-panel="settings"><span class="nfp-icon"><?= $I['speed'] ?></span><b><i class="lg">Speed (</i><span id="actSpeed">1x</span><i class="lg">)</i></b></button>
       <button class="act" id="actLock"><span class="nfp-icon"><?= $I['unlock'] ?></span><b>Lock</b></button>
       <?php if ($type === 'tv'): ?><button class="act" data-panel="episodes"><span class="nfp-icon"><?= $I['eps'] ?></span><b>Episodes</b></button><?php endif; ?>
@@ -476,6 +479,12 @@ $I = [
       <div class="ps-size"><span>Subtitle size</span><div id="subSize"><button data-size="s" title="Small">S</button><button data-size="m" title="Medium">M</button><button data-size="l" title="Large">L</button></div></div>
       <div class="ps-size"><span>Subtitle style</span><div id="subStyle"><button data-style="shadow" title="Drop shadow" class="st-shadow">Aa</button><button data-style="box" title="Black box" class="st-box">Aa</button><button data-style="yellow" title="Yellow" class="st-yellow">Aa</button></div></div>
     </div>
+  </div>
+  <div class="nfp-panel nfp-panel-server" id="panel-server">
+    <button class="nfp-icon panel-x" data-close-panel><?= $I['close'] ?></button>
+    <h4 class="sheet-title">Streaming Servers</h4>
+    <p style="font-size:12px;opacity:0.75;margin:0 0 12px 0;">Switch between direct multi-quality HLS streams or embed fallback servers:</p>
+    <ul id="serverListDirect"></ul>
   </div>
   <div class="nfp-panel nfp-panel-settings" id="panel-settings">
     <button class="nfp-icon panel-x" data-close-panel><?= $I['close'] ?></button>

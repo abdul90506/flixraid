@@ -300,10 +300,26 @@
     }, 180);
   }
   video.addEventListener('progress', () => { if (root.classList.contains('is-loading')) { const a = bufferedAhead(); if (a) setPct(30 + Math.min(1, a / 6) * 69); } });
-  video.addEventListener('playing', () => { setPct(100, true); clearInterval(creepT); });
+  let loadTimeoutT = 0;
+  video.addEventListener('playing', () => { setPct(100, true); clearInterval(creepT); clearTimeout(loadTimeoutT); });
   function load(idx, at) {
     const s = D.sources[idx];
-    if (!started) { root.classList.add('is-loading'); startPct(); }
+    if (!started) {
+      root.classList.add('is-loading');
+      startPct();
+      clearTimeout(loadTimeoutT);
+      loadTimeoutT = setTimeout(() => {
+        if (!started && root.classList.contains('is-loading')) {
+          if (idx + 1 < D.sources.length) {
+            console.warn('Source ' + idx + ' timed out, falling back to next source...');
+            nextSource();
+          } else {
+            root.classList.remove('is-loading');
+            root.classList.add('need-play');
+          }
+        }
+      }, 9000);
+    }
     if (!s) return showError();
     srcIdx = idx; netTries = 0; mediaRecovered = 0; codecSwapped = false;
     const t = at ?? startAt;
@@ -827,9 +843,19 @@
     const li = e.target.closest('li[data-q]');
     if (!li || !hls) return;
     const i = +li.dataset.q;
-    if (i < 0) { hls.currentLevel = -1; prefs.quality = 'auto'; toast('Quality: Auto'); }
-    else { const l = hls.levels[i]; hls.currentLevel = i; prefs.quality = cls(l.height, l.width); toast('Quality: ' + label(l.height, l.width)); }
-    savePrefs(); buildQuality();
+    if (i < 0) {
+      hls.currentLevel = -1;
+      prefs.quality = 'auto';
+      toast('Quality: Auto (Adaptive)');
+    } else {
+      const l = hls.levels[i];
+      hls.currentLevel = i;
+      hls.loadLevel = i;
+      prefs.quality = cls(l.height, l.width);
+      toast('Quality: ' + label(l.height, l.width));
+    }
+    savePrefs();
+    buildQuality();
     if (touch) setTimeout(closePanels, 250);
   });
   video.addEventListener('loadedmetadata', buildQuality);
@@ -838,34 +864,49 @@
      servers (Direct HLS & Embed Fallback Switcher)
      ===================================================================== */
   function buildServers() {
-    const ul = $('#serverList');
-    if (!ul || !D.sources) return;
+    const uls = [$('#serverList'), $('#serverListDirect')].filter(Boolean);
+    if (!uls.length || !D.sources) return;
+
+    const curSource = D.sources[srcIdx] || D.sources[0];
+    const isCurEmbed = (curSource?.kind === 'embed');
+    const srvBadge = $('.srvBadge');
+    if (srvBadge) {
+      srvBadge.textContent = isCurEmbed ? 'EMBED' : 'DIRECT';
+      srvBadge.style.background = isCurEmbed ? '#e50914' : '#22c55e';
+    }
+    const actServer = $('#actServer');
+    if (actServer && curSource) {
+      actServer.textContent = curSource.server || 'Server';
+    }
 
     let html = D.sources.map((s, idx) => {
       const isCur = (srcIdx === idx);
       const isEmbed = (s.kind === 'embed');
       const badge = isEmbed ? '<span style="font-size:11px;background:#e50914;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">EMBED</span>' : '<span style="font-size:11px;background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">DIRECT</span>';
-      const name = s.server || s.label || ('Server ' + (idx + 1));
-      const subInfo = s.lang ? `<small style="display:block;opacity:0.7;font-size:12px;margin-top:2px;">${esc(s.lang)}</small>` : '';
+      const name = s.label || s.server || ('Server ' + (idx + 1));
+      const subInfo = (s.lang && !name.includes(s.lang)) ? `<small style="display:block;opacity:0.7;font-size:12px;margin-top:2px;">${esc(s.lang)}</small>` : '';
       return `<li data-srv="${idx}" class="${isCur ? 'on' : ''}">${CHECK}<div style="flex:1;"><b>${esc(name)}</b> ${badge}${subInfo}</div></li>`;
     }).join('');
 
-    ul.innerHTML = html;
+    uls.forEach(ul => { ul.innerHTML = html; });
   }
 
-  $('#serverList')?.addEventListener('click', (e) => {
+  function handleServerClick(e) {
     const li = e.target.closest('li[data-srv]');
     if (!li || !D.sources) return;
     const idx = +li.dataset.srv;
     if (idx !== srcIdx) {
       const s = D.sources[idx];
-      toast('Switching Server: ' + (s.server || s.label || 'Server'));
+      toast('Switching: ' + (s.label || s.server || 'Server'));
       const curT = video.currentTime || 0;
       load(idx, curT);
       buildServers();
-      if (touch) setTimeout(closePanels, 250);
+      closePanels();
     }
-  });
+  }
+
+  $('#serverList')?.addEventListener('click', handleServerClick);
+  $('#serverListDirect')?.addEventListener('click', handleServerClick);
 
   /* =====================================================================
      audio tracks

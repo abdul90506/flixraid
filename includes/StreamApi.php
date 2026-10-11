@@ -19,11 +19,11 @@ class StreamApi
     private static string $moviesApiKey = '3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13';
 
     /**
-     * Build proxy streaming URL (Uses Cloudflare Worker if defined, else local proxy.php)
+     * Build proxy streaming URL (Uses local proxy.php by default to avoid Cloudflare 403 on scraper/CDNs, or worker if compatible)
      */
-    public static function buildStreamUrl(string $targetUrl, string $referer = 'https://google.com'): string
+    public static function buildStreamUrl(string $targetUrl, string $referer = 'https://google.com', bool $preferWorker = false): string
     {
-        if (defined('STREAM_WORKER_URL') && STREAM_WORKER_URL) {
+        if ($preferWorker && defined('STREAM_WORKER_URL') && STREAM_WORKER_URL) {
             $base = rtrim(STREAM_WORKER_URL, '/');
             return "{$base}/?url=" . urlencode($targetUrl) . '&ref=' . urlencode($referer);
         }
@@ -40,7 +40,13 @@ class StreamApi
         $cacheFile = CACHE_DIR . "/src_{$type}_{$tmdbId}_{$season}_{$episode}.json";
         if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600 * 3)) {
             $cached = json_decode(file_get_contents($cacheFile), true);
-            if (!empty($cached)) return $cached;
+            if (!empty($cached)) {
+                $hasHls = false;
+                foreach ($cached as $c) {
+                    if (($c['kind'] ?? '') === 'hls') { $hasHls = true; break; }
+                }
+                if ($hasHls) return $cached;
+            }
         }
 
         $sources = [];
@@ -49,8 +55,10 @@ class StreamApi
         // ==========================================
         // 1. Direct Server: 8StreamApi (AllMovieLand)
         // ==========================================
-        if ($type === 'movie' && $imdbId) {
-            $eightStreams = self::get8StreamMovieSources($imdbId);
+        if ($imdbId) {
+            $eightStreams = ($type === 'movie') 
+                ? self::get8StreamMovieSources($imdbId) 
+                : self::get8StreamTvSources($imdbId, $season, $episode);
             if (!empty($eightStreams)) {
                 foreach ($eightStreams as $st) {
                     $sources[] = $st;
@@ -123,7 +131,13 @@ class StreamApi
         }
 
         if (!empty($sources)) {
-            @file_put_contents($cacheFile, json_encode($sources));
+            $hasHls = false;
+            foreach ($sources as $s) {
+                if (($s['kind'] ?? '') === 'hls') { $hasHls = true; break; }
+            }
+            if ($hasHls) {
+                @file_put_contents($cacheFile, json_encode($sources));
+            }
         }
 
         return $sources;
@@ -320,6 +334,79 @@ class StreamApi
                     'kind'    => 'hls',
                     'server'  => '8StreamApi',
                 ];
+            }
+        }
+
+        return $sources;
+    }
+
+    /**
+     * Get TV series episode sources from 8StreamApi (AllMovieLand)
+     */
+    private static function get8StreamTvSources(string $imdbId, int $season, int $episode): array
+    {
+        $domain = self::getPlayerDomain();
+        $playUrl = "{$domain}/play/{$imdbId}";
+        $html = self::httpGet($playUrl, [
+            'Referer: https://google.com',
+            'Origin: https://allmovieland.fun/'
+        ]);
+
+        if (!$html || !preg_match('/new\s+HDVBPlayer\((\{.+?\})\);/s', $html, $m)) {
+            return [];
+        }
+
+        $conf = json_decode($m[1], true);
+        if (empty($conf['file']) || empty($conf['key'])) {
+            return [];
+        }
+
+        $playlistRes = self::httpGet($domain . $conf['file'], [
+            "X-Csrf-Token: {$conf['key']}",
+            "Referer: {$playUrl}",
+            "Origin: {$domain}"
+        ]);
+
+        if (!$playlistRes) return [];
+        $data = json_decode($playlistRes, true);
+        if (!is_array($data)) return [];
+
+        $sources = [];
+        foreach ($data as $sItem) {
+            $sNum = (int)preg_replace('/\D/', '', $sItem['title'] ?? ($sItem['id'] ?? ''));
+            if ($sNum !== $season) continue;
+
+            $episodes = $sItem['folder'] ?? [];
+            foreach ($episodes as $eItem) {
+                $eNum = (int)($eItem['episode'] ?? preg_replace('/\D/', '', $eItem['title'] ?? ''));
+                if ($eNum !== $episode) continue;
+
+                $langs = $eItem['folder'] ?? [];
+                foreach ($langs as $lItem) {
+                    if (empty($lItem['file']) || empty($lItem['title'])) continue;
+                    $langTitle = trim($lItem['title']);
+                    $path = ltrim($lItem['file'], '/') . '.txt';
+                    $streamApiUrl = "{$domain}/playlist/{$path}";
+
+                    $m3u8Res = self::httpGet($streamApiUrl, [
+                        "X-Csrf-Token: {$conf['key']}",
+                        "Referer: {$playUrl}",
+                        "Origin: {$domain}",
+                        "Accept: */*"
+                    ]);
+
+                    $masterM3u8 = trim($m3u8Res ?: '');
+                    if (preg_match('#^https?://#i', $masterM3u8)) {
+                        $streamUrl = self::buildStreamUrl($masterM3u8, $playUrl);
+                        $sources[] = [
+                            'label'   => "8StreamApi ({$langTitle})",
+                            'lang'    => $langTitle,
+                            'url'     => $streamUrl,
+                            'kind'    => 'hls',
+                            'server'  => '8StreamApi',
+                        ];
+                    }
+                }
             }
         }
 

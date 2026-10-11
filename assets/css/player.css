@@ -55,7 +55,12 @@ svg { display: block; width: 100%; height: 100%; }
   background: linear-gradient(0deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%); }
 .nfp.is-idle .nfp-top, .nfp.is-idle .nfp-bottom, .nfp.is-idle .nfp-center { opacity: 0; visibility: hidden; pointer-events: none; }
 .nfp.is-idle .nfp-bottom { transform: translateY(10px); }
-.nfp.is-loading .nfp-bottom, .nfp.is-loading .nfp-center, .nfp.is-error .nfp-bottom, .nfp.is-error .nfp-center,
+.nfp.is-loading .nfp-top { opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; z-index: 55 !important; transform: none !important; }
+.nfp.is-loading .nfp-bottom { opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; z-index: 55 !important; transform: none !important; }
+.nfp.is-loading.is-idle .nfp-top { opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; transform: none !important; }
+.nfp.is-loading.is-idle .nfp-bottom { opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; transform: none !important; }
+.nfp.is-loading .nfp-center { opacity: 0; visibility: hidden; pointer-events: none; }
+.nfp.is-error .nfp-bottom, .nfp.is-error .nfp-center,
 .nfp.is-ended .nfp-bottom, .nfp.is-ended .nfp-center, .nfp.is-locked .nfp-top, .nfp.is-locked .nfp-bottom, .nfp.is-locked .nfp-center { opacity: 0; visibility: hidden; pointer-events: none; }
 .nfp.show-pauseinfo .nfp-center { opacity: 0; visibility: hidden; }
 
@@ -160,7 +165,7 @@ svg { display: block; width: 100%; height: 100%; }
 .nfp-lock.show .nfp-unlock { opacity: 1; }
 
 /* ---------- panels ---------- */
-.nfp-panel { position: absolute; z-index: 30; right: var(--pad); bottom: calc(var(--ctl) + var(--pad) + 46px); background: rgba(38,38,38,.97); border-radius: 6px;
+.nfp-panel { position: absolute; z-index: 70; right: var(--pad); bottom: calc(var(--ctl) + var(--pad) + 46px); background: rgba(38,38,38,.97); border-radius: 6px;
   box-shadow: 0 16px 50px rgba(0,0,0,.7); opacity: 0; visibility: hidden; transform: translateY(8px); transition: .2s ease; max-height: calc(100% - 150px); overflow: auto; overscroll-behavior: contain; }
 .nfp-panel.open { opacity: 1; visibility: visible; transform: none; }
 .nfp-panel h4 { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
@@ -863,19 +868,21 @@ body.wpage { background: #0a0a0a; min-height: 100vh; }
    v4 – loader ring · ripple-only skips · short text · season picker · cast
    ===================================================================== */
 /* Netflix loading ring with % (initial load) */
-.nfp-ring { --p: 0; position: relative; width: clamp(64px, 7vw, 92px); aspect-ratio: 1; display: grid; place-items: center; }
+.nfp-ring { --p: 0; position: relative; width: clamp(72px, 8vw, 96px); height: clamp(72px, 8vw, 96px); display: flex; align-items: center; justify-content: center; }
 .nfp-ring::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
-  background: conic-gradient(#e50914 calc(var(--p) * 1%), rgba(255,255,255,.13) 0);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4.5px));
-          mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4.5px));
-  transition: background .2s; }
-.nfp-ring::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid transparent; border-top-color: rgba(229,9,20,.55); animation: nfpspin 1.1s linear infinite; }
-.nfp-ring span { font: 700 clamp(14px, 1.5vw, 19px)/1 Inter, Arial, sans-serif; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-/* buffering: same red ring style, no number */
-.nfp-spinner { border: 0 !important; background: conic-gradient(from 0deg, rgba(229,9,20,0) 0deg, rgba(229,9,20,.15) 60deg, #e50914 320deg, rgba(229,9,20,0) 321deg);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4.5px));
-          mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4.5px));
-  animation: nfpspin .8s linear infinite; }
+  border: 4px solid rgba(255,255,255,.15); border-top-color: var(--red); border-right-color: var(--red);
+  box-shadow: 0 0 20px rgba(229,9,20,.45);
+  animation: nfpspin .9s cubic-bezier(.4, 0, .2, 1) infinite; }
+.nfp-ring::after { content: ""; position: absolute; inset: -8px; border-radius: 50%;
+  border: 2px dashed rgba(229,9,20,.35);
+  animation: nfpspin 3.5s linear infinite reverse; }
+.nfp-ring span { position: relative; z-index: 2; font: 800 clamp(16px, 1.8vw, 22px)/1 Inter, Arial, sans-serif; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-shadow: 0 2px 10px rgba(0,0,0,.9); }
+/* buffering: clean glowing Netflix red ring */
+.nfp-spinner { width: clamp(52px, 6vw, 70px) !important; height: clamp(52px, 6vw, 70px) !important; border-radius: 50% !important;
+  border: 4px solid rgba(255,255,255,.15) !important; border-top-color: var(--red) !important; border-right-color: var(--red) !important;
+  box-shadow: 0 0 22px rgba(229,9,20,.5) !important;
+  animation: nfpspin .8s cubic-bezier(.4, 0, .2, 1) infinite !important;
+  background: transparent !important; mask: none !important; -webkit-mask: none !important; }
 
 /* double-tap skip on phones: only the ripple – hide centre buttons & chrome while it shows */
 .nfp.is-rippling .nfp-center, .nfp.is-rippling .nfp-top, .nfp.is-rippling .nfp-bottom, .nfp.is-rippling .nfp-shade,
@@ -1067,10 +1074,11 @@ body.has-behind.wpage::before { opacity: 0; transition: opacity .5s ease; }
 body.has-behind.wpage::after { background: rgba(0,0,0,.15); }
 body.is-playing .wm-behind { visibility: hidden; }
 
-/* ---------- instant play: no % loading screen – just the frame + a small spinner ---------- */
-.nfp-loading { display: none !important; }
-.nfp.is-loading .nfp-buffer { opacity: 1 !important; transition: opacity .15s ease !important; }
-.nfp.is-loading .nfp-top { opacity: 1; visibility: visible; transform: none; }
+/* ---------- loading screen: visible with spinner & percentage, controls overlay on top ---------- */
+.nfp.is-loading .nfp-loading { opacity: 1; visibility: visible; }
+.nfp:not(.is-loading) .nfp-loading { opacity: 0; visibility: hidden; pointer-events: none; }
+.nfp.is-loading .nfp-buffer { opacity: 0; }
+.nfp.is-buffering:not(.is-loading) .nfp-buffer { opacity: 1 !important; }
 
 /* ---------- smooth chrome: quick ease-in, slow fade-out (Netflix) ---------- */
 .nfp-top, .nfp-bottom, .nfp-center, .nfp-shade, .nfp-nextpill {
