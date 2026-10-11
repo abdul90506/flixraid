@@ -367,9 +367,10 @@ $I = [
   </div>
   <div class="nfp-buffer" id="nfpBuffer"><div class="nfp-spinner"></div></div>
 
-  <!-- top bar: only a close X (desktop), + centred title on touch -->
+  <!-- top bar: close X, + centred title on touch + Server switcher in embed mode -->
   <div class="nfp-top">
     <div class="nfp-top-title"><b><?= e($d['title']) ?></b><?php if ($type === 'tv'): ?><span>S<?= $s ?>:E<?= $e ?><?= $episode ? ' “' . e($episode['name']) . '”' : '' ?></span><?php endif; ?></div>
+    <button class="nfp-icon nfp-server embed-server-btn" data-panel="server" title="Switch Server" style="display:none;" aria-label="Switch Server"><?= $I['server'] ?><span>Server</span></button>
     <button class="nfp-icon nfp-close" id="nfpClose" title="Close (Esc)" aria-label="Close player"><?= $I['close'] ?></button>
   </div>
 

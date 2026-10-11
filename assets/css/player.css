@@ -1308,3 +1308,78 @@ body.has-behind .wm-brand { display: none !important; }
 /* time + title scale with the bigger bar */
 .nfp.is-desk .nfp-time { font-size: clamp(15px, 1.15vw, 19px); }
 .nfp.is-desk .nfp-title { font-size: clamp(16px, 1.35vw, 22px); }
+
+/* =====================================================================
+   v7 – Embed Mode: Hide our custom playback controls and show ONLY Server Switcher
+   ===================================================================== */
+.nfp.is-embed-mode video { display: none !important; }
+.nfp.is-embed-mode .nfp-iframe { display: block !important; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 20 !important; pointer-events: auto !important; background: #000; }
+.nfp.is-embed-mode .nfp-click,
+.nfp.is-embed-mode .nfp-shade,
+.nfp.is-embed-mode .nfp-ripple,
+.nfp.is-embed-mode .nfp-flash,
+.nfp.is-embed-mode .nfp-center,
+.nfp.is-embed-mode .nfp-bigplay,
+.nfp.is-embed-mode .nfp-subs,
+.nfp.is-embed-mode .nfp-pauseinfo,
+.nfp.is-embed-mode .nfp-progress-row,
+.nfp.is-embed-mode .nfp-left,
+.nfp.is-embed-mode .nfp-loading,
+.nfp.is-embed-mode .nfp-buffer,
+.nfp.is-embed-mode .nfp-q,
+.nfp.is-embed-mode .nfp-cc,
+.nfp.is-embed-mode #btnPip,
+.nfp.is-embed-mode #btnNext,
+.nfp.is-embed-mode [data-panel="subs"],
+.nfp.is-embed-mode [data-panel="episodes"],
+.nfp.is-embed-mode [data-panel="settings"],
+.nfp.is-embed-mode .touch-row .act:not([data-panel="server"]):not(.act-fs) {
+  display: none !important;
+}
+.nfp.is-embed-mode .nfp-top {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  z-index: 35 !important;
+  background: linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%) !important;
+}
+.nfp.is-embed-mode .embed-server-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  background: rgba(229, 9, 20, 0.95) !important;
+  color: #fff !important;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-left: auto;
+  margin-right: 14px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  cursor: pointer;
+  transition: transform .18s, background .18s;
+}
+.nfp.is-embed-mode .embed-server-btn:hover {
+  transform: scale(1.06);
+  background: #ff1e2b !important;
+}
+.nfp.is-embed-mode .embed-server-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.nfp.is-embed-mode .nfp-bottom {
+  opacity: 1 !important;
+  visibility: visible !important;
+  z-index: 35 !important;
+  background: transparent !important;
+  padding-top: 0 !important;
+  pointer-events: none !important;
+}
+.nfp.is-embed-mode .nfp-bottom .nfp-right,
+.nfp.is-embed-mode .nfp-bottom .touch-row {
+  pointer-events: auto !important;
+}
+.nfp.is-embed-mode .nfp-title {
+  display: none !important;
+}
+
