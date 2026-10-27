@@ -298,6 +298,64 @@ $I = [
       </div>
     </div>
 
+    <!-- VegaMovies Drivers & Direct Mirrors Suite -->
+    <div class="wm-vega-suite" style="margin: 20px 0 24px 0; padding: 18px 20px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-block;width:9px;height:9px;background:#22c55e;border-radius:50%;box-shadow:0 0 8px #22c55e;"></span>
+          <h3 style="font-size:14px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;color:#fff;margin:0;">VegaMovies Cloud Drivers (Direct &amp; Mirrors)</h3>
+        </div>
+        <span style="font-size:11px;color:#22c55e;font-weight:700;background:rgba(34,197,94,0.15);padding:3px 8px;border-radius:6px;border:1px solid rgba(34,197,94,0.3);"><?= e($audioInfo ?: 'Multi-Audio') ?></span>
+      </div>
+
+      <!-- Qualities Row -->
+      <?php if (!empty($qualities)): ?>
+      <div style="margin-bottom:14px;">
+        <span style="font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;display:block;margin-bottom:6px;">Available Resolutions &amp; Qualities:</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <?php foreach ($qualities as $qi => $q): ?>
+            <button type="button" class="wm-q-pill" data-vega-q="<?= e($q['quality']) ?>" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);padding:6px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <span><?= e($q['quality']) ?></span>
+              <?php if (!empty($q['size'])): ?><span style="font-size:10px;color:#aaa;font-weight:500;"><?= e($q['size']) ?></span><?php endif; ?>
+              <?php if (!empty($q['isHevc'])): ?><span style="font-size:9px;background:#eab308;color:#000;padding:1px 4px;border-radius:3px;font-weight:800;">HEVC</span><?php endif; ?>
+              <?php if (!empty($q['is60Fps'])): ?><span style="font-size:9px;background:#06b6d4;color:#000;padding:1px 4px;border-radius:3px;font-weight:800;">60FPS</span><?php endif; ?>
+            </button>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
+      <!-- Streaming Servers & Download Mirrors Row -->
+      <?php if (!empty($sources)): ?>
+      <div style="margin-bottom:14px;">
+        <span style="font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;display:block;margin-bottom:6px;">Direct Streaming Servers &amp; High-Speed Mirrors:</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <?php foreach ($sources as $si => $srv): 
+            $isStream = ($srv['type'] ?? '') !== 'download';
+            $badgeBg = $isStream ? '#22c55e' : '#3b82f6';
+          ?>
+            <a class="wm-srv-pill" href="<?= e($srv['url']) ?>" <?= $isStream ? 'data-stream-idx="' . $si . '"' : 'target="_blank" rel="noopener"' ?> style="background:rgba(255,255,255,0.07);color:#fff;border:1px solid rgba(255,255,255,0.14);padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+              <span><?= e($srv['server']) ?></span>
+              <span style="font-size:9px;background:<?= $badgeBg ?>;color:#fff;padding:2px 5px;border-radius:4px;font-weight:800;text-transform:uppercase;"><?= e($srv['badge'] ?? ($isStream ? 'Stream' : 'Download')) ?></span>
+            </a>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
+      <!-- Dual / Multi Audio Tracks -->
+      <?php if (!empty($audioTracks)): ?>
+      <div>
+        <span style="font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;display:block;margin-bottom:6px;">Supported Audio Tracks:</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <?php foreach ($audioTracks as $trk): ?>
+            <span style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.25);padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;"><?= e($trk) ?></span>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+    </div>
+
     <!-- mobile tabs -->
     <nav class="wm-tabs m-only" id="wmTabs">
       <?php if ($type === 'tv'): ?><button data-tab="episodes" class="on">Episodes</button><?php endif; ?>
@@ -397,7 +455,7 @@ $I = [
 <!-- ===================== PLAYER (full-viewport layer) ===================== -->
 <section class="stage" id="stage">
 <div class="nfp is-loading is-paused<?= $type === 'tv' ? ' is-tv' : '' ?><?= $next ? ' has-next' : '' ?>" id="nfp" tabindex="-1">
-  <video id="nfpVideo" playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
+  <video id="nfpVideo" playsinline webkit-playsinline preload="auto"></video>
   <div class="nfp-subs" id="nfpSubs" aria-live="off"></div>
   <div class="nfp-click" id="nfpClick"></div>
   <div class="nfp-shade"></div>

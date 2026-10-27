@@ -278,23 +278,17 @@
   let loadTimeoutT = 0;
   video.addEventListener('playing', () => { clearTimeout(loadTimeoutT); });
   function load(idx, at) {
+    if (!D.sources || !D.sources.length) return;
+    idx = Math.max(0, Math.min(idx, D.sources.length - 1));
     const s = D.sources[idx];
-    if (!started) {
-      root.classList.add('is-loading');
-      clearTimeout(loadTimeoutT);
-      loadTimeoutT = setTimeout(() => {
-        if (!started && root.classList.contains('is-loading')) {
-          if (idx + 1 < D.sources.length) {
-            console.warn('Source ' + idx + ' timed out, falling back to next source...');
-            nextSource();
-          } else {
-            root.classList.remove('is-loading');
-            root.classList.add('need-play');
-          }
-        }
-      }, 9000);
+    if (!s) return;
+
+    if (s.type === 'download' || (s.url && (s.url.includes('hubcloud.ist') || s.url.includes('gofile.io')))) {
+      window.open(s.url, '_blank');
+      toast('Opening ' + (s.server || 'download mirror') + ' in new tab...');
+      return;
     }
-    if (!s) return showError();
+
     srcIdx = idx; netTries = 0; mediaRecovered = 0; codecSwapped = false;
     const t = at ?? startAt;
     startAt = t;
@@ -306,6 +300,14 @@
     // Direct Vega Native HTML5 / MKV / MP4 stream mode
     video.style.display = 'block';
     root.classList.remove('is-embed-mode');
+    root.classList.add('is-loading');
+
+    clearTimeout(loadTimeoutT);
+    loadTimeoutT = setTimeout(() => {
+      if (root.classList.contains('is-loading')) {
+        root.classList.remove('is-loading');
+      }
+    }, 15000);
 
     if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8'))) {
       hls = new Hls({
@@ -335,9 +337,15 @@
       hls.on(Hls.Events.ERROR, onHlsError);
       hls.attachMedia(video);
     } else {
-      video.src = s.url; // Safari / iOS native HLS or MP4
+      video.src = s.url; // Direct HTML5 video (MP4/MKV)
       if (t > 0) video.addEventListener('loadedmetadata', () => { try { video.currentTime = t; } catch { /* ignore */ } }, { once: true });
-      video.addEventListener('loadedmetadata', () => { buildQuality(); buildAudio(); buildSubs(); restoreSubPref(); buildServers(); }, { once: true });
+      video.addEventListener('loadedmetadata', () => {
+        root.classList.remove('is-loading');
+        buildQuality(); buildAudio(); buildSubs(); restoreSubPref(); buildServers();
+      }, { once: true });
+      video.addEventListener('canplay', () => {
+        root.classList.remove('is-loading', 'is-buffering');
+      }, { once: true });
       tryPlay();
     }
     video.playbackRate = curSpeed;
@@ -355,11 +363,29 @@
     }
     nextSource();
   }
-  video.addEventListener('error', () => { if (!hls) nextSource(); });
+  video.addEventListener('error', () => {
+    if (hls) return;
+    console.warn('[FlixRaid Player] Error loading source #' + srcIdx, video.error);
+    nextSource();
+  });
   function nextSource() {
     const t = video.currentTime || startAt;
-    if (srcIdx + 1 < D.sources.length) load(srcIdx + 1, t);
-    else showError();
+    let nextIdx = -1;
+    for (let i = srcIdx + 1; i < D.sources.length; i++) {
+      if (D.sources[i].type !== 'download' && !D.sources[i].url.includes('hubcloud.ist')) {
+        nextIdx = i;
+        break;
+      }
+    }
+    if (nextIdx !== -1) {
+      toast(`Switching to ${D.sources[nextIdx].server || 'alternative server'}...`);
+      load(nextIdx, t);
+    } else {
+      root.classList.remove('is-loading', 'is-buffering');
+      root.classList.add('need-play', 'is-paused');
+      toast('Could not decode stream on this server. Please choose another Server or Quality.', 6000);
+      openPanel('server', $('.nfp-server'));
+    }
   }
   let autoMuted = false;
   const unmuteBtn = $('#nfpUnmute');
@@ -881,7 +907,10 @@
 
     let html = D.sources.map((s, idx) => {
       const isCur = (srcIdx === idx);
-      const badge = '<span style="font-size:11px;background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">DIRECT</span>';
+      const isStream = (s.type !== 'download' && !s.url.includes('hubcloud.ist') && !s.url.includes('gofile.io'));
+      const badgeText = isStream ? 'DIRECT STREAM' : 'DOWNLOAD MIRROR';
+      const badgeBg = isStream ? '#22c55e' : '#3b82f6';
+      const badge = `<span style="font-size:10px;background:${badgeBg};color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">${badgeText}</span>`;
       const name = s.label || s.server || ('Server ' + (idx + 1));
       const subInfo = (s.lang && !name.includes(s.lang)) ? `<small style="display:block;opacity:0.7;font-size:12px;margin-top:2px;">${esc(s.lang)}</small>` : '';
       return `<li data-srv="${idx}" class="${isCur ? 'on' : ''}">${CHECK}<div style="flex:1;"><b>${esc(name)}</b> ${badge}${subInfo}</div></li>`;
@@ -1356,9 +1385,41 @@
   }
   function boot() {
     booted = true;
-    if (!D.sources || !D.sources.length) { showError('No video source found for this title.'); return; }
-    if (!window.Hls && !video.canPlayType('application/vnd.apple.mpegurl')) { showError('Your browser cannot play this stream.'); return; }
-    load(0, startAt);
+    if (!D.sources || !D.sources.length) {
+      root.classList.add('is-loading');
+      const sParam = D.s ? `&s=${D.s}` : '';
+      const eParam = D.e ? `&e=${D.e}` : '';
+      const uParam = D.vegaUrl ? `&url=${encodeURIComponent(D.vegaUrl)}` : '';
+      fetch(`api.php?action=stream&type=${D.type}&id=${D.id}${sParam}${eParam}${uParam}`)
+        .then(r => r.json())
+        .then(res => {
+          if (res && res.sources && res.sources.length) {
+            D.sources = res.sources;
+            if (res.qualities) D.qualities = res.qualities;
+            if (res.audioTracks) D.audioTracks = res.audioTracks;
+            if (res.episodes) D.episodes = res.episodes;
+            boot();
+          } else {
+            root.classList.remove('is-loading');
+            toast('No stream sources found.');
+            openPanel('server', $('.nfp-server'));
+          }
+        })
+        .catch(() => {
+          root.classList.remove('is-loading');
+          toast('Failed to load streaming links.');
+          openPanel('server', $('.nfp-server'));
+        });
+      return;
+    }
+    let firstStreamIdx = 0;
+    for (let i = 0; i < D.sources.length; i++) {
+      if (D.sources[i].type !== 'download' && !D.sources[i].url.includes('hubcloud.ist')) {
+        firstStreamIdx = i;
+        break;
+      }
+    }
+    load(firstStreamIdx, startAt);
   }
   /* v6: warm the stream up in the background while the info pop-up is open, so Play starts instantly
      (no loading screen) — manifest + first few seconds only, never autoplays */
@@ -1396,18 +1457,28 @@
       // 3. Ultra-fast dynamic stream resolution from API
       const sParam = D.s ? `&s=${D.s}` : '';
       const eParam = D.e ? `&e=${D.e}` : '';
-      fetch(`api.php?action=stream&type=${D.type}&id=${D.id}${sParam}${eParam}`)
+      const uParam = D.vegaUrl ? `&url=${encodeURIComponent(D.vegaUrl)}` : '';
+      fetch(`api.php?action=stream&type=${D.type}&id=${D.id}${sParam}${eParam}${uParam}`)
         .then(r => r.json())
         .then(res => {
           if (res && res.sources && res.sources.length) {
             D.sources = res.sources;
+            if (res.qualities) D.qualities = res.qualities;
+            if (res.audioTracks) D.audioTracks = res.audioTracks;
+            if (res.episodes) D.episodes = res.episodes;
             if (res.subtitles) D.subtitles = res.subtitles;
             boot();
           } else {
-            showError('No playable stream found.');
+            root.classList.remove('is-loading');
+            toast('No stream sources found.');
+            openPanel('server', $('.nfp-server'));
           }
         })
-        .catch(() => showError('Failed to load streaming links.'));
+        .catch(() => {
+          root.classList.remove('is-loading');
+          toast('Failed to load streaming links.');
+          openPanel('server', $('.nfp-server'));
+        });
     }
 
     // phones: playing from the details sheet goes straight to landscape full screen (like the Netflix app)
@@ -1483,6 +1554,44 @@
   $('#wmHero')?.addEventListener('click', (e) => {
     if (e.target.closest('#wmTrailerChip, #wmTrailerBox, .wm-chip-trailer, .wm-round, .wm-close, #wmClose')) return;
     openPlayer(true);
+  });
+
+  /* Click listeners for Vega Quality & Server pills on details sheet */
+  document.addEventListener('click', (e) => {
+    const qPill = e.target.closest('.wm-q-pill');
+    if (qPill) {
+      e.preventDefault();
+      const qual = qPill.dataset.vegaQ;
+      openPlayer(true);
+      const qLi = document.querySelector(`li[data-vega-q="${qual}"]`);
+      if (qLi) {
+        qLi.click();
+      } else {
+        root.classList.add('is-loading');
+        fetch(`api.php?action=stream&type=${D.type}&id=${D.id}&quality=${encodeURIComponent(qual)}&url=${encodeURIComponent(D.vegaUrl || '')}`)
+          .then(r => r.json())
+          .then(data => {
+            root.classList.remove('is-loading');
+            if (data.sources && data.sources.length) {
+              D.sources = data.sources;
+              load(0, 0);
+              buildServers();
+              buildQuality();
+            }
+          })
+          .catch(() => root.classList.remove('is-loading'));
+      }
+      return;
+    }
+
+    const srvPill = e.target.closest('[data-stream-idx]');
+    if (srvPill) {
+      e.preventDefault();
+      const idx = +srvPill.dataset.streamIdx;
+      openPlayer(true);
+      load(idx, 0);
+      return;
+    }
   });
 
   /* trailer inside the hero (YouTube, same as the title page) */

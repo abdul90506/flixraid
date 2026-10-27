@@ -353,12 +353,15 @@ class VegaApi
             $vdata = self::resolveVCloud($targetUrl);
             $servers = [];
             if ($vdata) {
-                if ($vdata['r2Url']) $servers[] = ['id' => 'r2', 'name' => 'Server 1: Cloudflare R2', 'badge' => 'Direct Ultra Fast Stream', 'url' => $vdata['r2Url'], 'type' => 'stream'];
-                if ($vdata['gpdlUrl']) $servers[] = ['id' => 'gpdl', 'name' => 'Server 2: HubCloud 10Gbps', 'badge' => '10Gbps Speed', 'url' => $vdata['gpdlUrl'], 'type' => 'stream'];
-                if ($vdata['pixeldrainUrl']) $servers[] = ['id' => 'pixeldrain', 'name' => 'Server 3: Pixeldrain', 'badge' => 'Direct Cloud', 'url' => $vdata['pixeldrainUrl'], 'type' => 'stream'];
-                if ($vdata['gofileUrl']) $servers[] = ['id' => 'gofile', 'name' => 'Server 4: Gofile', 'badge' => 'High Speed', 'url' => $vdata['gofileUrl'], 'type' => 'stream'];
+                if ($vdata['r2Url']) $servers[] = ['id' => 'r2', 'name' => 'Server: Cloudflare R2', 'badge' => 'Direct Stream', 'url' => $vdata['r2Url'], 'type' => 'stream'];
+                if ($vdata['gpdlUrl']) $servers[] = ['id' => 'gpdl', 'name' => 'Mirror: HubCloud 10Gbps', 'badge' => '10Gbps Download', 'url' => $vdata['gpdlUrl'], 'type' => 'download'];
+                if ($vdata['pixeldrainUrl']) $servers[] = ['id' => 'pixeldrain', 'name' => 'Mirror: Pixeldrain', 'badge' => 'Direct Cloud', 'url' => $vdata['pixeldrainUrl'], 'type' => 'download'];
+                if ($vdata['gofileUrl']) $servers[] = ['id' => 'gofile', 'name' => 'Mirror: Gofile', 'badge' => 'High Speed', 'url' => $vdata['gofileUrl'], 'type' => 'download'];
             }
-            $primary = $servers[0]['url'] ?? '';
+            $primary = '';
+            foreach ($servers as $s) { if ($s['type'] === 'stream') { $primary = $s['url']; break; } }
+            if (empty($primary) && !empty($servers)) $primary = $servers[0]['url'];
+
             $out = [
                 'isEpisodeList'    => false,
                 'servers'          => $servers,
@@ -440,33 +443,87 @@ class VegaApi
         $vcloudUrl = preg_match('/href=["\'](https:\/\/vcloud\.beer\/[^"\']+)["\']/i', $html, $vm) ? $vm[1] : null;
         $filepressUrl = preg_match('/href=["\'](https:\/\/filebee\.xyz\/file\/[^"\']+)["\']/i', $html, $fpm) ? $fpm[1] : null;
 
-        $allServers = [];
+        $streamableServers = [];
+        $downloadServers = [];
 
-        if ($vcloudUrl) {
-            $vdata = self::resolveVCloud($vcloudUrl);
-            if ($vdata) {
-                if ($vdata['r2Url']) $allServers[] = ['id' => 'r2', 'name' => 'Server 1: Cloudflare R2', 'badge' => 'Direct Ultra Fast Stream', 'url' => $vdata['r2Url'], 'type' => 'stream'];
-                if ($vdata['gpdlUrl']) $allServers[] = ['id' => 'gpdl', 'name' => 'Server 2: HubCloud 10Gbps', 'badge' => '10Gbps Speed', 'url' => $vdata['gpdlUrl'], 'type' => 'stream'];
-                if ($vdata['pixeldrainUrl']) $allServers[] = ['id' => 'pixeldrain', 'name' => 'Server 3: Pixeldrain', 'badge' => 'Direct Cloud', 'url' => $vdata['pixeldrainUrl'], 'type' => 'stream'];
-                if ($vdata['gofileUrl']) $allServers[] = ['id' => 'gofile', 'name' => 'Server 4: Gofile', 'badge' => 'High Speed', 'url' => $vdata['gofileUrl'], 'type' => 'stream'];
-            }
-        }
-
+        // 1) FastDL (Google UserContent)
         if ($fastdlUrl) {
             $gUrl = self::resolveFastDL($fastdlUrl, $targetUrl);
             if ($gUrl) {
-                $allServers[] = ['id' => 'google', 'name' => 'Server: Google UserContent', 'badge' => 'Instant Google Stream', 'url' => $gUrl, 'type' => 'stream'];
+                $streamableServers[] = [
+                    'id'    => 'google',
+                    'name'  => 'Server 1: Google UserContent',
+                    'badge' => 'Instant Google Stream',
+                    'url'   => $gUrl,
+                    'type'  => 'stream'
+                ];
+            }
+        }
+
+        // 2) V-Cloud (Cloudflare R2 + Download Mirrors)
+        if ($vcloudUrl) {
+            $vdata = self::resolveVCloud($vcloudUrl);
+            if ($vdata) {
+                if (!empty($vdata['r2Url'])) {
+                    $streamableServers[] = [
+                        'id'    => 'r2',
+                        'name'  => 'Server 2: Cloudflare R2',
+                        'badge' => 'Direct Fast Stream',
+                        'url'   => $vdata['r2Url'],
+                        'type'  => 'stream'
+                    ];
+                }
+                if (!empty($vdata['gpdlUrl'])) {
+                    $downloadServers[] = [
+                        'id'    => 'gpdl',
+                        'name'  => 'Server 3: HubCloud 10Gbps',
+                        'badge' => '10Gbps Download',
+                        'url'   => $vdata['gpdlUrl'],
+                        'type'  => 'download'
+                    ];
+                }
+                if (!empty($vdata['pixeldrainUrl'])) {
+                    $downloadServers[] = [
+                        'id'    => 'pixeldrain',
+                        'name'  => 'Server 4: Pixeldrain',
+                        'badge' => 'Direct Cloud',
+                        'url'   => $vdata['pixeldrainUrl'],
+                        'type'  => 'download'
+                    ];
+                }
+                if (!empty($vdata['gofileUrl'])) {
+                    $downloadServers[] = [
+                        'id'    => 'gofile',
+                        'name'  => 'Server 5: Gofile',
+                        'badge' => 'High Speed',
+                        'url'   => $vdata['gofileUrl'],
+                        'type'  => 'download'
+                    ];
+                }
             }
         }
 
         if ($filepressUrl) {
-            $allServers[] = ['id' => 'filepress', 'name' => 'Server: Filepress Mirror', 'badge' => 'Direct Mirror', 'url' => $filepressUrl, 'type' => 'stream'];
+            $downloadServers[] = [
+                'id'    => 'filepress',
+                'name'  => 'Server 6: Filepress Mirror',
+                'badge' => 'Direct Mirror',
+                'url'   => $filepressUrl,
+                'type'  => 'download'
+            ];
         }
+
+        $allServers = array_merge($streamableServers, $downloadServers);
+        $primary = '';
+        foreach ($allServers as $s) {
+            if ($s['type'] === 'stream') { $primary = $s['url']; break; }
+        }
+        if (empty($primary) && !empty($allServers)) $primary = $allServers[0]['url'];
 
         $out = [
             'isEpisodeList'    => false,
             'servers'          => $allServers,
-            'primaryStreamUrl' => $allServers[0]['url'] ?? ''
+            'primaryStreamUrl' => $primary
         ];
         @file_put_contents($cacheFile, json_encode($out));
         return $out;
@@ -578,12 +635,14 @@ class VegaApi
             // Movie
             if (!empty($qualities)) {
                 $targetQual = $qualities[0];
-                // Prefer 720p or 1080p if available
+                // Prefer non-HEVC 720p or standard 1080p for 100% browser decoding
                 foreach ($qualities as $q) {
-                    if (!empty($desiredQuality) && stripos($q['quality'], $desiredQuality) !== false) {
-                        $targetQual = $q; break;
-                    } elseif (empty($desiredQuality) && stripos($q['quality'], '720p') !== false) {
-                        $targetQual = $q; break;
+                    if (!empty($desiredQuality)) {
+                        if (stripos($q['quality'], $desiredQuality) !== false) { $targetQual = $q; break; }
+                    } else {
+                        if (stripos($q['quality'], '720p') !== false && empty($q['isHevc'])) {
+                            $targetQual = $q; break;
+                        }
                     }
                 }
                 $targetNexdriveUrl = $targetQual['nexdriveUrl'] ?? '';
@@ -620,10 +679,12 @@ class VegaApi
 
         foreach ($servers as $idx => $srv) {
             $sources[] = [
+                'id'       => $srv['id'] ?? ('srv_' . $idx),
                 'label'    => $srv['name'] . ' (' . ($targetQual['quality'] ?? 'HD') . ')',
                 'server'   => $srv['name'],
                 'url'      => $srv['url'],
-                'kind'     => 'direct',
+                'type'     => $srv['type'] ?? 'stream',
+                'kind'     => $srv['type'] ?? 'direct',
                 'quality'  => $targetQual['quality'] ?? 'HD',
                 'lang'     => $scraped['audioInfo'] ?? 'Dual Audio [Hindi + English]',
                 'badge'    => $srv['badge'] ?? 'DIRECT STREAM'
