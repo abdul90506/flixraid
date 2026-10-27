@@ -7,12 +7,28 @@
 require __DIR__ . '/includes/bootstrap.php';
 require_once __DIR__ . '/includes/StreamApi.php';
 
+$url  = q('url');
 $type = q('type') === 'tv' ? 'tv' : 'movie';
 $id   = qi('id');
 $s    = max(0, qi('s', 1));
 $e    = max(1, qi('e', 1));
 $info = q('info') === '1';
-$embed = q('embed') === '1';  // desktop: shown as a pop-up iframe over the browse page (home stays visible, blurred, behind it)   // open the details pop-up / title sheet first (card click) instead of auto-playing
+$embed = q('embed') === '1';
+
+$scrapedVega = null;
+if (!empty($url) && !$id) {
+    require_once __DIR__ . '/includes/VegaApi.php';
+    $scrapedVega = VegaApi::scrapePost($url);
+    if (!empty($scrapedVega['isSeries'])) $type = 'tv';
+    $cleanT = trim(preg_replace('/^(?:Download\s+)/i', '', $scrapedVega['title'] ?? ''));
+    $cleanT = trim(preg_replace('/\s*(?:\(Season\b.*|\b(?:Dual\s*Audio|Hindi|480p|720p|1080p|2160p|4k|WEB-DL|HDRip).*)[\s\S]*$/i', '', $cleanT));
+    if ($cleanT) {
+        $tmdbFind = $tmdb->search($type, $cleanT);
+        if (!empty($tmdbFind['items'])) {
+            $id = (int)$tmdbFind['items'][0]['id'];
+        }
+    }
+}
 
 $r = $id ? $tmdb->batch(fn(Tmdb $t) => [
     'd'       => $t->details($type, $id),
@@ -23,6 +39,23 @@ $r = $id ? $tmdb->batch(fn(Tmdb $t) => [
 ]) : ['d' => null];
 
 $d = $r['d'] ?? null;
+if (!$d && !empty($url)) {
+    $d = [
+        'id'            => 0,
+        'title'         => $scrapedVega['title'] ?? 'VegaMovies Stream',
+        'overview'      => 'Direct driver streaming powered by VegaMovies with multi-audio and high-speed mirrors.',
+        'year'          => date('Y'),
+        'rating'        => 8.5,
+        'certification' => 'HD',
+        'backdrop'      => '',
+        'poster'        => $scrapedVega['poster'] ?? '',
+        'cast'          => [],
+        'crew'          => [],
+        'genres'        => ['Cinema', 'VegaMovies Direct'],
+        'facts'         => []
+    ];
+}
+
 if (!$d) {
     http_response_code(404);
     layout_header('Not found', ['body' => 'plain']);
@@ -65,49 +98,65 @@ if ($type === 'tv') {
     if ($prev) $prev['url'] = watch_url('tv', $id, $prev['s'], $prev['e']);
 }
 
-/* ---------- player data ---------- */
-$backdrop = ($episode['still'] ?? null) ?: $d['backdrop'];
-$bgImg    = $d['backdrop'] ? img($d['backdrop'], 'w1280') : ($backdrop ? img($backdrop, 'w1280') : '');
-$logo     = $r['logo'] ? 'https://image.tmdb.org/t/p/w500' . $r['logo'] : '';
-$match    = $d['rating'] ? (int)round($d['rating'] * 10) : null;
+/* ---------- player data from VegaMovies ---------- */
+$backdrop = ($episode['still'] ?? null) ?: ($d['backdrop'] ?? '');
+$bgImg    = !empty($d['backdrop']) ? img($d['backdrop'], 'w1280') : ($backdrop ? img($backdrop, 'w1280') : '');
+$logo     = !empty($r['logo']) ? 'https://image.tmdb.org/t/p/w500' . $r['logo'] : '';
+$match    = !empty($d['rating']) ? (int)round($d['rating'] * 10) : null;
 $director = array_values(array_filter($d['crew'] ?? [], fn($c) => in_array($c['job'], ['Director', 'Creator'], true)));
 $cast     = array_slice($d['cast'] ?? [], 0, 8);
 $genres   = array_column($d['genres'] ?? [], 'name');
 $realSeasons = array_values(array_filter($seasons, fn($x) => (int)$x['number'] > 0));
 
-$sources = StreamApi::getSources($type, $id, $s, $e);
+$vegaData = !empty($url) 
+    ? StreamApi::getSourcesForVegaUrl($url, $type, $s, $e)
+    : StreamApi::getVegaData($type, $id, $s, $e, $d['title'] ?? '');
+
+$vegaReleases = !empty($d['title']) ? VegaApi::matchTmdb($d['title'], $type, $s) : [];
+$sources = $vegaData['sources'] ?? [];
 $subtitles = StreamApi::getSubtitles($type, $id, $s, $e);
+$qualities = $vegaData['qualities'] ?? [];
+$audioTracks = $vegaData['audioTracks'] ?? [];
+$audioInfo = $vegaData['audioInfo'] ?? '';
+$vegaPostTitle = $vegaData['postTitle'] ?? ($scrapedVega['title'] ?? '');
+$vegaPostUrl = $vegaData['postUrl'] ?? $url;
 
 $data = [
-    'type'      => $type,
-    'id'        => $id,
-    's'         => $type === 'tv' ? $s : null,
-    'e'         => $type === 'tv' ? $e : null,
-    'title'     => $d['title'],
-    'epTitle'   => $episode['name'] ?? null,
-    'poster'    => $d['poster'],
-    'backdrop'  => $backdrop,
-    'bg'        => $bgImg,
-    'year'      => $d['year'],
-    'titleUrl'  => title_url($type, $id),
-    'sources'   => $sources,
-    'subtitles' => $subtitles,
-    'intro'     => DEMO_INTRO,
-    'credits'   => DEMO_CREDITS,
-    'skip'      => PLAYER_SKIP_SECONDS,
-    'next'      => $next,
-    'prev'      => $prev,
-    'episodes' => array_map(fn($x) => [
-        'number' => (int)$x['number'], 'name' => $x['name'], 'overview' => $x['overview'], 'runtime' => $x['runtime'],
-        'still' => $x['still'] ? img($x['still'], 'w300') : '', 'url' => watch_url('tv', $id, $s, (int)$x['number']),
+    'type'         => $type,
+    'id'           => $id,
+    's'            => $type === 'tv' ? $s : null,
+    'e'            => $type === 'tv' ? $e : null,
+    'title'        => $d['title'],
+    'epTitle'      => $episode['name'] ?? null,
+    'poster'       => $d['poster'] ?? '',
+    'backdrop'     => $backdrop,
+    'bg'           => $bgImg,
+    'year'         => $d['year'] ?? '',
+    'titleUrl'     => title_url($type, $id),
+    'sources'      => $sources,
+    'subtitles'    => $subtitles,
+    'qualities'    => $qualities,
+    'audioTracks'  => $audioTracks,
+    'audioInfo'    => $audioInfo,
+    'vegaUrl'      => $vegaPostUrl,
+    'vegaTitle'    => $vegaPostTitle,
+    'vegaReleases' => $vegaReleases,
+    'intro'        => DEMO_INTRO,
+    'credits'     => DEMO_CREDITS,
+    'skip'        => PLAYER_SKIP_SECONDS,
+    'next'        => $next,
+    'prev'        => $prev,
+    'episodes'    => array_map(fn($x) => [
+        'number'   => (int)$x['number'], 'name' => $x['name'], 'overview' => $x['overview'], 'runtime' => $x['runtime'],
+        'still'    => $x['still'] ? img($x['still'], 'w300') : '', 'url' => watch_url('tv', $id, $s, (int)$x['number']),
     ], $eps),
-    'recs'     => array_map(fn($x) => [
-        'title' => $x['title'], 'img' => !empty($x['backdrop']) ? img($x['backdrop'], 'w500') : (!empty($x['poster']) ? img($x['poster'], 'w342') : ''),
-        'url' => watch_url($x['type'], (int)$x['id']),
+    'recs'        => array_map(fn($x) => [
+        'title'    => $x['title'], 'img' => !empty($x['backdrop']) ? img($x['backdrop'], 'w500') : (!empty($x['poster']) ? img($x['poster'], 'w342') : ''),
+        'url'      => watch_url($x['type'], (int)$x['id']),
     ], array_slice($r['recs'] ?? [], 0, 6)),
-    'info'     => $info,
-    'embed'    => $embed,
-    'item'     => ['id' => $id, 'type' => $type, 'title' => $d['title'], 'poster' => $d['poster'], 'backdrop' => $d['backdrop'], 'year' => $d['year']],
+    'info'        => $info,
+    'embed'       => $embed,
+    'item'        => ['id' => $id, 'type' => $type, 'title' => $d['title'], 'poster' => $d['poster'] ?? '', 'backdrop' => $d['backdrop'] ?? '', 'year' => $d['year'] ?? ''],
 ];
 
 /* extra modal data */
@@ -349,7 +398,6 @@ $I = [
 <section class="stage" id="stage">
 <div class="nfp is-loading is-paused<?= $type === 'tv' ? ' is-tv' : '' ?><?= $next ? ' has-next' : '' ?>" id="nfp" tabindex="-1">
   <video id="nfpVideo" playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
-  <iframe id="nfpIframe" class="nfp-iframe" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;z-index:2;background:#000;"></iframe>
   <div class="nfp-subs" id="nfpSubs" aria-live="off"></div>
   <div class="nfp-click" id="nfpClick"></div>
   <div class="nfp-shade"></div>
@@ -483,8 +531,14 @@ $I = [
   <div class="nfp-panel nfp-panel-server" id="panel-server">
     <button class="nfp-icon panel-x" data-close-panel><?= $I['close'] ?></button>
     <h4 class="sheet-title">Streaming Servers</h4>
-    <p style="font-size:12px;opacity:0.75;margin:0 0 12px 0;">Switch between direct multi-quality HLS streams or embed fallback servers:</p>
+    <p style="font-size:12px;opacity:0.75;margin:0 0 12px 0;">Direct high-speed driver stream mirrors (VegaMovies Cloud):</p>
     <ul id="serverListDirect"></ul>
+    <div id="vegaReleasesWrap" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12);" hidden>
+      <div style="font-size:11px;font-weight:700;color:#22c55e;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Other VegaMovies Releases / Seasons:
+      </div>
+      <ul id="vegaReleasesList" style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;"></ul>
+    </div>
   </div>
   <div class="nfp-panel nfp-panel-settings" id="panel-settings">
     <button class="nfp-icon panel-x" data-close-panel><?= $I['close'] ?></button>

@@ -76,6 +76,8 @@ input,select{font:inherit;color:inherit}
 .suggest h5{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);padding:10px 10px 6px;font-weight:700}
 .sg-item{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px;transition:background .15s}
 .sg-item:hover,.sg-item.focus{background:rgba(255,255,255,.07)}
+.sg-item.sg-item-vega{background:rgba(34,197,94,.05);border-left:3px solid #22c55e}
+.sg-item.sg-item-vega:hover{background:rgba(34,197,94,.14)}
 .sg-item img,.sg-item .sg-ph{width:42px;height:62px;object-fit:cover;border-radius:6px;background:var(--surface-2);flex:none}
 .sg-item.person img,.sg-item.person .sg-ph{width:44px;height:44px;border-radius:50%}
 .sg-body{min-width:0;flex:1}

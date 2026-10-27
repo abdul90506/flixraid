@@ -74,14 +74,30 @@
     };
 
     function render(data, q) {
-      const items = data.items || [], people = data.people || [];
-      if (!items.length && !people.length) {
+      const items = data.items || [], people = data.people || [], vega = data.vega || [];
+      if (!items.length && !people.length && !vega.length) {
         panel.innerHTML = `<div class="sg-empty">No results for “${esc(q)}”</div>`;
         return;
       }
       let h = '';
+
+      // 1. VegaMovies Instant Releases Section
+      if (vega.length) {
+        h += '<h5 style="color:#22c55e;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> VegaMovies Releases (Instant Play)</h5>';
+        h += vega.map((v) => `
+          <a class="sg-item sg-item-vega" href="${esc(v.watchUrl)}" style="border-left: 2px solid #22c55e;">
+            ${v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="" loading="lazy">` : '<div class="sg-ph"></div>'}
+            <div class="sg-body">
+              <div class="sg-title" style="color:#fff;font-weight:700;">${hl(v.title, q)}</div>
+              <div class="sg-sub" style="color:#22c55e;font-size:11px;">Direct Driver Streams &middot; Multi-Audio</div>
+            </div>
+            <span class="sg-play" style="background:#22c55e;" data-href="${esc(v.watchUrl)}" title="Watch Vega Release">${ICON.play}</span>
+          </a>`).join('');
+      }
+
+      // 2. TMDB Movies & TV
       if (items.length) {
-        h += '<h5>Movies &amp; TV</h5>';
+        h += '<h5>Movies &amp; TV (Cinema Catalog)</h5>';
         h += items.map((it) => `
           <a class="sg-item" href="${esc(it.url)}">
             ${it.poster ? `<img src="${esc(it.poster)}" alt="" loading="lazy">` : '<div class="sg-ph"></div>'}

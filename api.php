@@ -1,19 +1,24 @@
 <?php
 /**
- * JSON / HTML-fragment API used by the front-end (AJAX).
+ * JSON / HTML-fragment API used by Flixraid front-end (AJAX).
  *
- *  ?action=suggest&q=           realtime search dropdown
+ *  ?action=suggest&q=           realtime search dropdown (TMDB + VegaMovies)
  *  ?action=search&type=&q=&page=  search page (infinite scroll)
  *  ?action=browse&type=&cat=&genre=&page=
  *  ?action=row&key=             lazy home rows
  *  ?action=season&id=&s=&mode=title|watch
  *  ?action=credits&type=&id=
  *  ?action=posters&ids=movie:550,tv:1396   posters for "More Like This" on phones
- *  ?action=hover&type=tv&id=1396         Netflix hover card info (also warms the watch-page cache)
- *  ?action=recinfo&ids=movie:550,tv:1396   poster, runtime, certification, overview, seasons (More Like This cards)
+ *  ?action=hover&type=tv&id=1396         Netflix hover card info
+ *  ?action=recinfo&ids=movie:550,tv:1396   poster, runtime, certification, overview, seasons
+ *  ?action=stream&type=&id=&s=&e=        resolves VegaMovies stream sources
+ *  ?action=vega_search&q=                direct VegaMovies search
+ *  ?action=vega_scrape&url=              direct VegaMovies post scrape
+ *  ?action=vega_resolve&url=             direct VegaMovies driver resolver
  */
 require __DIR__ . '/includes/bootstrap.php';
 require __DIR__ . '/includes/rows.php';
+require_once __DIR__ . '/includes/VegaApi.php';
 
 $action = q('action');
 
@@ -21,13 +26,15 @@ switch ($action) {
 
     case 'suggest': {
         $qStr = mb_substr(q('q'), 0, 80);
-        if (mb_strlen($qStr) < 2) json_out(['items' => [], 'people' => []]);
+        if (mb_strlen($qStr) < 2) json_out(['items' => [], 'people' => [], 'vega' => []]);
+        
+        // 1. Fetch TMDB matches
         $r = $tmdb->batch(fn(Tmdb $t) => [
             'movie'  => $t->search('movie', $qStr),
             'tv'     => $t->search('tv', $qStr),
             'person' => $t->search('person', $qStr),
         ]);
-        // interleave movies & tv, keep TMDB relevance order
+        
         $m = $r['movie']['items'] ?? [];
         $s = $r['tv']['items'] ?? [];
         $mixed = [];
@@ -35,25 +42,39 @@ switch ($action) {
             if (isset($m[$i])) $mixed[] = $m[$i];
             if (isset($s[$i])) $mixed[] = $s[$i];
         }
-        // exact-ish title matches first
+        
         $needle = mb_strtolower($qStr);
         usort($mixed, function ($a, $b) use ($needle) {
             $sa = mb_strpos(mb_strtolower($a['title']), $needle) === 0 ? 0 : 1;
             $sb = mb_strpos(mb_strtolower($b['title']), $needle) === 0 ? 0 : 1;
             return $sa <=> $sb;
         });
+        
         $items = array_map(fn($i) => [
             'id' => $i['id'], 'type' => $i['type'], 'title' => $i['title'], 'year' => $i['year'],
             'poster' => $i['poster'] ? img($i['poster'], 'w92') : null,
             'url' => title_url($i['type'], $i['id']), 'watch' => watch_url($i['type'], $i['id']),
-        ], array_slice($mixed, 0, 8));
+        ], array_slice($mixed, 0, 6));
+
         $people = array_map(fn($p) => [
             'id' => $p['id'], 'name' => $p['name'], 'dept' => $p['dept'], 'known' => $p['known'],
             'profile' => $p['profile'] ? img($p['profile'], 'w92') : null, 'url' => person_url($p['id']),
-        ], array_slice($r['person']['items'] ?? [], 0, 3));
+        ], array_slice($r['person']['items'] ?? [], 0, 2));
+
+        // 2. Fetch VegaMovies live matches
+        $vegaHits = VegaApi::search($qStr)['hits'] ?? [];
+        $vegaItems = array_slice($vegaHits, 0, 5);
+
         json_out([
-            'items' => $items, 'people' => $people,
-            'counts' => ['movie' => $r['movie']['total'] ?? 0, 'tv' => $r['tv']['total'] ?? 0, 'person' => $r['person']['total'] ?? 0],
+            'items'  => $items,
+            'people' => $people,
+            'vega'   => $vegaItems,
+            'counts' => [
+                'movie'  => $r['movie']['total'] ?? 0,
+                'tv'     => $r['tv']['total'] ?? 0,
+                'person' => $r['person']['total'] ?? 0,
+                'vega'   => count($vegaHits)
+            ],
         ]);
     }
 
@@ -129,8 +150,6 @@ switch ($action) {
         $type = q('type') === 'tv' ? 'tv' : 'movie';
         $id   = qi('id');
         if (!$id) json_out(['error' => 'missing id'], 400);
-        // same calls as watch.php (info mode) → hovering a card pre-warms the pop-up
-        // lite=1 (hover cards, row pre-warming): only what the card shows → fewer TMDB pages per title
         $lite = q('lite') === '1';
         $r = $tmdb->batch(fn(Tmdb $t) => $lite ? [
             'd'       => $t->details($type, $id),
@@ -168,7 +187,6 @@ switch ($action) {
     }
 
     case 'logos': {
-        // title logos for the Continue Watching cards: ids=movie:550,tv:1396 (max 30)
         $keys = [];
         foreach (array_slice(explode(',', (string)q('ids')), 0, 30) as $k) {
             if (preg_match('/^(movie|tv):(\d{1,9})$/', trim($k), $m)) $keys[$m[1] . ':' . $m[2]] = [$m[1], (int)$m[2]];
@@ -218,14 +236,40 @@ switch ($action) {
         $id   = qi('id');
         $s    = max(1, qi('s', 1));
         $e    = max(1, qi('e', 1));
+        $url  = q('url');
+        $qual = q('quality');
 
-        $sources = StreamApi::getSources($type, $id, $s, $e);
-        $subs    = StreamApi::getSubtitles($type, $id, $s, $e);
+        if (!empty($url)) {
+            $data = StreamApi::getSourcesForVegaUrl($url, $type, $s, $e, $qual);
+        } else {
+            $data = StreamApi::getVegaData($type, $id, $s, $e, q('title'), $qual);
+        }
 
         json_out([
-            'sources'   => $sources,
-            'subtitles' => $subs,
+            'sources'     => $data['sources'] ?? [],
+            'qualities'   => $data['qualities'] ?? [],
+            'audioTracks' => $data['audioTracks'] ?? [],
+            'audioInfo'   => $data['audioInfo'] ?? '',
+            'isSeries'    => $data['isSeries'] ?? ($type === 'tv'),
+            'episodes'    => $data['episodes'] ?? [],
+            'postTitle'   => $data['postTitle'] ?? '',
+            'postUrl'     => $data['postUrl'] ?? ''
         ]);
+    }
+
+    case 'vega_search': {
+        $q = q('q');
+        json_out(VegaApi::search($q));
+    }
+
+    case 'vega_scrape': {
+        $url = q('url');
+        json_out(VegaApi::scrapePost($url));
+    }
+
+    case 'vega_resolve': {
+        $url = q('url');
+        json_out(VegaApi::resolveNexdrive($url));
     }
 
     default:

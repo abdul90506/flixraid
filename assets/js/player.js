@@ -243,6 +243,7 @@
      source loading (hls.js / native) + recovery
      ===================================================================== */
   let hls = null, srcIdx = 0, netTries = 0, mediaRecovered = 0, codecSwapped = false, curSpeed = 1;
+  let curQuality = D.qualities && D.qualities[0] ? D.qualities[0].quality : '', curAudioIdx = 0;
   let prebooting = false, prebootT = 0, bootReady = false;
   /* v6 desktop pop-up: this page runs inside an iframe over the browse page (watch.php?embed=1) */
   const EMBED = !!D.embed && window.parent !== window;
@@ -302,30 +303,11 @@
     buildServers();
     buildAudio();
 
-    if (s.kind === 'embed') {
-      video.style.display = 'none';
-      if (iframe) {
-        iframe.style.display = 'block';
-        iframe.onerror = () => {
-          showError('Embed server failed to load. Please try another server.');
-        };
-        iframe.src = s.url;
-      }
-      root.classList.remove('is-loading', 'is-buffering', 'need-play');
-      root.classList.add('is-embed-mode');
-      started = true;
-      return;
-    }
-
-    // Direct HTML5 / HLS stream mode
-    if (iframe) {
-      iframe.style.display = 'none';
-      iframe.src = 'about:blank';
-    }
+    // Direct Vega Native HTML5 / MKV / MP4 stream mode
     video.style.display = 'block';
     root.classList.remove('is-embed-mode');
 
-    if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8') || s.url.includes('proxy.php'))) {
+    if (window.Hls && Hls.isSupported() && (s.kind === 'hls' || s.url.includes('.m3u8'))) {
       hls = new Hls({
         enableWorker: true,
         startPosition: t > 0 ? t : -1,
@@ -795,7 +777,20 @@
   }
   function buildQuality() {
     const ul = $('#qualityList');
+    if (!ul) return;
     let html = '';
+    if (D.qualities && D.qualities.length > 0) {
+      html = D.qualities.map((q, idx) => {
+        const isCur = (curQuality ? curQuality === q.quality : idx === 0);
+        const sizeStr = q.size ? `<small style="margin-left:6px;opacity:0.8;">${esc(q.size)}</small>` : '';
+        const hevcBadge = q.isHevc ? '<span style="font-size:10px;background:#10b981;color:#fff;padding:1px 4px;border-radius:3px;margin-left:4px;">HEVC</span>' : '';
+        return `<li data-vega-q="${esc(q.quality)}" class="${isCur ? 'on' : ''}">${CHECK}${esc(q.quality)} ${hevcBadge}${sizeStr}</li>`;
+      }).join('');
+      ul.innerHTML = html;
+      const activeQ = curQuality || (D.qualities[0] && D.qualities[0].quality) || 'HD';
+      setBadge(activeQ);
+      return;
+    }
     if (hls && hls.levels.length) {
       const seen = new Map();
       hls.levels.forEach((l, i) => { const k = cls(l.height, l.width) || l.bitrate; if (!seen.has(k) || hls.levels[seen.get(k)].bitrate < l.bitrate) seen.set(k, i); });
@@ -810,45 +805,74 @@
       setBadge(cur ? badgeFor(cur.height, cur.width) : '');
     } else {
       const h = video.videoHeight;
-      html += `<li class="on">${CHECK}${h ? label(h, video.videoWidth) : 'Auto'}</li>`;
-      setBadge(badgeFor(h, video.videoWidth));
+      html += `<li class="on">${CHECK}${h ? label(h, video.videoWidth) : 'HD Direct'}</li>`;
+      setBadge(badgeFor(h, video.videoWidth) || 'HD');
     }
     ul.innerHTML = html;
   }
   $('#qualityList').addEventListener('click', (e) => {
-    const li = e.target.closest('li[data-q]');
-    if (!li || !hls) return;
-    const i = +li.dataset.q;
-    if (i < 0) {
-      hls.currentLevel = -1;
-      prefs.quality = 'auto';
-      toast('Quality: Auto (Adaptive)');
-    } else {
-      const l = hls.levels[i];
-      hls.currentLevel = i;
-      hls.loadLevel = i;
-      prefs.quality = cls(l.height, l.width);
-      toast('Quality: ' + label(l.height, l.width));
+    const li = e.target.closest('li[data-vega-q], li[data-q]');
+    if (!li) return;
+    if (li.dataset.vegaQ) {
+      const qual = li.dataset.vegaQ;
+      if (qual === curQuality) return;
+      curQuality = qual;
+      toast('Switching Quality: ' + qual);
+      const curT = video.currentTime || 0;
+      root.classList.add('is-loading');
+      fetch(`api.php?action=stream&type=${D.type}&id=${D.id}&s=${D.s || 1}&e=${D.e || 1}&quality=${encodeURIComponent(qual)}&url=${encodeURIComponent(D.vegaUrl || '')}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.sources && data.sources.length) {
+            D.sources = data.sources;
+            load(0, curT);
+            buildServers();
+            buildQuality();
+            buildAudio();
+          } else {
+            root.classList.remove('is-loading');
+            toast('Quality stream not ready');
+          }
+        })
+        .catch(() => {
+          root.classList.remove('is-loading');
+          toast('Failed to switch quality');
+        });
+      if (touch) setTimeout(closePanels, 250);
+      return;
     }
-    savePrefs();
-    buildQuality();
-    if (touch) setTimeout(closePanels, 250);
+    if (hls && li.dataset.q !== undefined) {
+      const i = +li.dataset.q;
+      if (i < 0) {
+        hls.currentLevel = -1;
+        prefs.quality = 'auto';
+        toast('Quality: Auto (Adaptive)');
+      } else {
+        const l = hls.levels[i];
+        hls.currentLevel = i;
+        hls.loadLevel = i;
+        prefs.quality = cls(l.height, l.width);
+        toast('Quality: ' + label(l.height, l.width));
+      }
+      savePrefs();
+      buildQuality();
+      if (touch) setTimeout(closePanels, 250);
+    }
   });
   video.addEventListener('loadedmetadata', buildQuality);
 
   /* =====================================================================
-     servers (Direct HLS & Embed Fallback Switcher)
+     servers (Direct Vega Driver Switcher)
      ===================================================================== */
   function buildServers() {
     const uls = [$('#serverList'), $('#serverListDirect')].filter(Boolean);
     if (!uls.length || !D.sources) return;
 
     const curSource = D.sources[srcIdx] || D.sources[0];
-    const isCurEmbed = (curSource?.kind === 'embed');
     const srvBadge = $('.srvBadge');
     if (srvBadge) {
-      srvBadge.textContent = isCurEmbed ? 'EMBED' : 'DIRECT';
-      srvBadge.style.background = isCurEmbed ? '#e50914' : '#22c55e';
+      srvBadge.textContent = 'DIRECT';
+      srvBadge.style.background = '#22c55e';
     }
     const actServer = $('#actServer');
     if (actServer && curSource) {
@@ -857,15 +881,42 @@
 
     let html = D.sources.map((s, idx) => {
       const isCur = (srcIdx === idx);
-      const isEmbed = (s.kind === 'embed');
-      const badge = isEmbed ? '<span style="font-size:11px;background:#e50914;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">EMBED</span>' : '<span style="font-size:11px;background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">DIRECT</span>';
+      const badge = '<span style="font-size:11px;background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700;">DIRECT</span>';
       const name = s.label || s.server || ('Server ' + (idx + 1));
       const subInfo = (s.lang && !name.includes(s.lang)) ? `<small style="display:block;opacity:0.7;font-size:12px;margin-top:2px;">${esc(s.lang)}</small>` : '';
       return `<li data-srv="${idx}" class="${isCur ? 'on' : ''}">${CHECK}<div style="flex:1;"><b>${esc(name)}</b> ${badge}${subInfo}</div></li>`;
     }).join('');
 
     uls.forEach(ul => { ul.innerHTML = html; });
+    buildVegaReleases();
   }
+
+  function buildVegaReleases() {
+    const wrap = $('#vegaReleasesWrap');
+    const ul = $('#vegaReleasesList');
+    if (!wrap || !ul) return;
+    if (!D.vegaReleases || D.vegaReleases.length <= 1) {
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    ul.innerHTML = D.vegaReleases.map((rel) => {
+      const isCur = D.vegaUrl && (D.vegaUrl === rel.fullUrl || D.vegaUrl.includes(rel.permalink));
+      return `<li data-vega-url="${esc(rel.fullUrl)}" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:${isCur ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.06)'};border:${isCur ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.08)'};display:flex;align-items:center;gap:10px;">
+        <span style="font-size:12px;color:#fff;font-weight:${isCur ? '700' : '500'};flex:1;line-height:1.3;">${esc(rel.title)}</span>
+        <span style="font-size:11px;color:#22c55e;font-weight:700;">${isCur ? 'PLAYING' : 'SELECT'}</span>
+      </li>`;
+    }).join('');
+  }
+
+  $('#vegaReleasesList')?.addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-vega-url]');
+    if (!li) return;
+    const url = li.dataset.vegaUrl;
+    if (url === D.vegaUrl) return;
+    toast('Loading Release from VegaMovies...');
+    location.href = `watch.php?url=${encodeURIComponent(url)}`;
+  });
 
   function handleServerClick(e) {
     const li = e.target.closest('li[data-srv]');
@@ -893,7 +944,12 @@
     const ulSettings = $('#settingAudioList');
     let html = '';
 
-    if (D.sources && D.sources.length > 1) {
+    if (D.audioTracks && D.audioTracks.length > 0) {
+      html = D.audioTracks.map((trk, i) => {
+        const isCurrent = (curAudioIdx === i);
+        return `<li data-vega-audio="${i}" class="${isCurrent ? 'on' : ''}">${CHECK}${esc(trk)}</li>`;
+      }).join('');
+    } else if (D.sources && D.sources.length > 1) {
       html = D.sources.map((s, idx) => {
         const isCurrent = (srcIdx === idx);
         const name = s.label || s.lang || ('Audio Track ' + (idx + 1));
@@ -917,8 +973,18 @@
   }
 
   function handleAudioSelection(e) {
-    const li = e.target.closest('[data-src-idx], [data-a]');
+    const li = e.target.closest('[data-vega-audio], [data-src-idx], [data-a]');
     if (!li) return;
+    if (li.dataset.vegaAudio !== undefined) {
+      curAudioIdx = +li.dataset.vegaAudio;
+      toast('Audio: ' + D.audioTracks[curAudioIdx]);
+      if (video.audioTracks && video.audioTracks.length > curAudioIdx) {
+        Array.from(video.audioTracks).forEach((t, j) => { t.enabled = (j === curAudioIdx); });
+      }
+      buildAudio();
+      if (touch) setTimeout(closePanels, 250);
+      return;
+    }
     if (li.dataset.srcIdx !== undefined) {
       const idx = +li.dataset.srcIdx;
       if (idx !== srcIdx) {
